@@ -1,13 +1,13 @@
-# MCP Message Design for Hydravisor
+# Hydravisor – Model Context Protocol Design
 
 **Version:** 0.1.2  
-**File:** `./mcp.design.md`
+**File:** `./technical_design/mcp.design.md`
 
 ---
 
 ## 🎯 Purpose
 
-This document specifies the structure, semantics, and message flow design of the Model Context Protocol (MCP) as used within Hydravisor. It serves as a schema contract for agent interaction, AI orchestration, and VM lifecycle messaging. It defines the Model Context Protocol (MCP) used within Hydravisor to enable structured, secure message routing between local agents, AI models, and virtual machines. It formalizes the semantics of session scope, command structure, routing logic, and policy enforcement.
+This document defines the Model Context Protocol (MCP) used within Hydravisor to enable structured, secure message routing between local agents, AI models, and virtual machines. It serves as a schema contract for agent interaction, AI orchestration, and VM lifecycle messaging. It formalizes the semantics of session scope, command structure, routing logic, and policy enforcement.
 
 ---
 
@@ -136,16 +136,19 @@ Each route is evaluated for permission via `policy.toml`, and unauthorized route
 | `model/send` | `{text: String}`        | Forward message to attached model |
 | `log/query`  | `{session_id: String}`  | Retrieve past session logs        |
 
+### Payload Schema Reference
+
+* Schema stub: `payload.schema.json`
+* Validation tool: TBD (deferred to post-MVP)
+
 ---
 
 ## 🛡️ Policy Scoping & Enforcement
 
 * All commands must pass authz check:
-
   * `src` must be explicitly allowed by both `agent` and `vm` config
   * `type` must not exceed scope of agent role (e.g., `sandboxed` agents blocked from `vm/exec`)
 * Deny-by-default if:
-
   * Any field is missing
   * Command type is undefined
   * Agent or VM is unrecognized
@@ -155,7 +158,6 @@ Each route is evaluated for permission via `policy.toml`, and unauthorized route
 ## ⏳ Session Scoping
 
 * Each MCP session is:
-
   * Bound to a unique agent ↔ VM relationship
   * Assigned an internal `session_id` for tracking logs, models, messages
 * Agents may operate across **multiple concurrent sessions** (configurable default: 10)
@@ -180,7 +182,7 @@ Each route is evaluated for permission via `policy.toml`, and unauthorized route
 
 ## 🔐 Security Considerations
 
-Each message should be wrapped with metadata from Hydravisor’s session enforcement layer:
+Each message should be wrapped with metadata from Hydravisor's session enforcement layer:
 
 * `agent_fingerprint`
 * `role` (e.g., `trusted`, `sandboxed`, `audited`)
@@ -192,12 +194,13 @@ Hydravisor will deny messages violating ACLs or originating from unauthorized ro
 
 ## 🔄 Failure & Fallback
 
-| Error Type           | Response Behavior            |
-| -------------------- | ---------------------------- |
-| Invalid route        | Log error, respond to sender |
-| Unauthorized command | Deny and audit               |
-| Unavailable target   | Respond with 503-equivalent  |
-| Parsing/format error | Respond with 400-equivalent  |
+| Error Type             | Response Behavior            |
+| ---------------------- | ---------------------------- |
+| Invalid route          | Log error, respond to sender |
+| Unauthorized command   | Deny and audit               |
+| Unavailable target     | Respond with 503-equivalent  |
+| Parsing/format error   | Respond with 400-equivalent  |
+| Timeout (>10s default) | Log timeout and abort route  |
 
 Internal messages may surface to the user via the TUI (future work), and always emit to log stream.
 
@@ -217,7 +220,9 @@ Internal messages may surface to the user via the TUI (future work), and always 
 * Command chaining (`pipe` or `macro`) support
 * Agent ↔ Agent messaging
 * Rate limits or budgeted model access
-* JSON Schema validation for command payloads
+* JSON Schema validation for command payloads (`payload.schema.json`)
+* `mcp/heartbeat` support for long-lived agents or sessions
+* Retry logic and exponential backoff for recoverable errors
 
 ---
 
