@@ -5,6 +5,16 @@
 
 ---
 
+## 📖 Index of Sub-Designs
+
+* [`tui.design.md`](./technical_design/tui.design.md) – Terminal UI architecture
+* [`policy.toml.md`](./technical_design/policy.toml.md) – Trust enforcement model
+* [`mcp.design.md`](./technical_design/mcp.design.md) – Model Context Protocol specification
+* [`ssh.design.md`](./technical_design/ssh.design.md) – Key management and SSH trust
+* [`cli.design.md`](./technical_design/cli.design.md) – CLI interface and usage specification
+
+---
+
 ## 🎯 Purpose
 
 This document outlines the architecture, dependencies, module interactions, and verification criteria for Hydravisor: a TUI-based virtualization and AI model management tool written in Rust. It defines the architecture and key technical subsystems of the Hydravisor platform, covering session orchestration, terminal UI structure, security policy management, and interaction protocols for agent, model, and container lifecycles. It reflects design decisions finalized as of 2025-05-29.
@@ -316,18 +326,4 @@ modal_key = "9"
 | --------------------- | ------------------------------------------- | ------------------------------------------- |
 | Startup Time          | TUI boot time < 1s                          | Unit test with cold-start benchmark         |
 | Resource Usage        | TUI idle < 30MB RSS                         | System resource monitoring under load       |
-| CLI Ergonomics        | Commands self-documenting, short flags      | Validate `--help` output and error messages |
-| Offline Compatibility | Ollama and local tools work without network | Simulated network-off tests                 |
-| Modular Design        | Crate boundaries maintained                 | Code review & cargo module linter           |
-
----
-
-## 🎥 Tmux Session Recording & Archiving
-
-### Objective
-
-Record terminal interaction sessions, preserving both user and model behavior. These logs can be replayed, exported, or analyzed for audit and learning purposes.
-
-### Implementation Strategy
-
-* Use `tmux`'s `capture-pane` and `save-buffer`
+| CLI Ergonomics        | Commands
