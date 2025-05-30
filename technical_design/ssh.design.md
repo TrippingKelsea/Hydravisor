@@ -2,7 +2,7 @@
 
 ## 📜 Purpose
 
-The `ssh.toml` configuration file enables per-host SSH profile overrides for Hydravisor-managed virtual machines and containers. This allows the system to securely and flexibly connect to guests without relying solely on global SSH configuration files.
+The `ssh.toml` configuration file enables per-host SSH profile overrides for Hydravisor-managed virtual machines and containers. This allows the system to securely and flexibly connect to guests without relying solely on global SSH configuration files. It defines how SSH keypairs, trust overrides, and encryption plans are handled inside Hydravisor. It describes how agent/VM isolation is maintained using dedicated key material and how trust is optionally modifiable through configuration.
 
 ## 📂 File Location
 
@@ -27,7 +27,9 @@ $XDG_CONFIG_HOME/hydravisor/ssh.toml
 - Keys are stored by default in:
   
   ```text
-  $XDG_CONFIG_HOME/hydravisor/keys/
+  $XDG_CONFIG_HOME/hydravisor/keys.d/<vm-name>/
+  ├── id_ed25519_vm-host
+  └── id_ed25519_vm-client
   ```
 
 - In future releases, this directory may be replaced by an encrypted internal vault filesystem with CLI/API retrieval interfaces.
@@ -81,15 +83,92 @@ File: `./schemas/ssh.schema.json`
 }
 ```
 
-## 🔮 Future Work
+## 🔐 Key Generation Model
 
-- Encrypted vault storage for keys
-- UI management panel for SSH profiles
-- Configurable key rotation schedules
-- Boot-time VM SSH key injection with Arch-based builder
+### Per-VM Keypairs
+
+* Each VM gets two unique keypairs:
+
+  * **Client Keypair**: Used for outbound authentication from VM
+  * **Host Keypair**: Used for inbound SSH access into VM
+* Keys are generated at VM creation time unless overridden
+* Stored at:
+
+  ```text
+  $XDG_CONFIG_HOME/hydravisor/keys.d/<vm-name>/
+  ├── id_ed25519_vm-host
+  └── id_ed25519_vm-client
+  ```
+
+---
+
+## 🛂 Trust Override: `ssh.toml`
+
+* Path: `$XDG_CONFIG_HOME/hydravisor/ssh.toml`
+* Defines explicit overrides to generated keys or permitted agents
+
+### Example
+
+```toml
+[vm."vm-foo"]
+trusted_agents = ["agent-a"]
+custom_keys = {
+  host = "/path/to/custom_host.key",
+  client = "/path/to/custom_client.key"
+}
+```
+
+---
+
+## 🧾 Schema Validation
+
+* Schema file: `ssh.schema.json`
+* Required for CLI tooling validation
+
+---
+
+## 🗃️ Storage Plan
+
+* All keys stored under `keys.d/` directory
+* Permissions set to `0600` user-only
+* Key metadata optionally hashed or labeled with session fingerprints (future)
+
+---
+
+## 🔐 Encryption Backing (Planned)
+
+* Optional virtual encrypted disk (FUSE or Rust-native virtual block)
+* Encrypted store mountable on unlock
+* Keyed using user-supplied passphrase
+* Failure mode: **fail closed** (do not expose keys)
+
+---
+
+## 🚧 Failure Handling
+
+| Scenario                    | Behavior                          |
+| --------------------------- | --------------------------------- |
+| Missing key override        | Auto-generate securely            |
+| Invalid key format          | Validation error on load          |
+| Encrypted store unavailable | Refuse to start affected sessions |
+
+---
+
+## 📌 Future Features
+
+* Key rotation schedule (configurable)
+* Fingerprint-based identity cache
+* SSH CA support for organizational identity
+* Key usage logging per session
+
+---
 
 ## 📎 Related Files
 
 - [`ssh.toml`](ssh.toml)
 - [`ssh.schema.json`](ssh.schema.json)
 
+---
+
+Document maintained as part of the Hydravisor Project.
+Author: Kelsea + Alethe · 2025
