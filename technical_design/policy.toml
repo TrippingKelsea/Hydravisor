@@ -1,0 +1,48 @@
+# ~/.config/hydravisor/policy.toml
+
+# Hydravisor Security Policy File
+# Defines access controls for agents and models interacting with the system
+
+[roles]
+# Classify agents by trust level
+# Options: trusted, sandboxed, audited
+"ollama:llama3" = "trusted"
+"bedrock:claude" = "audited"
+"open-web-ui" = "sandboxed"
+
+[permissions.trusted]
+create_vm = true
+attach_terminal = true
+access_peer_vm = false
+use_credentials = true
+
+[permissions.sandboxed]
+create_vm = false
+attach_terminal = false
+access_peer_vm = false
+use_credentials = false
+
+[permissions.audited]
+create_vm = true
+attach_terminal = true
+access_peer_vm = false
+use_credentials = false
+log_all_commands = true
+
+[audit]
+# Where to store per-agent audit logs (relative to Hydravisor config dir)
+directory = "audit_logs"
+enabled = true
+
+[tmux]
+record_sessions = true
+log_path = "logs"
+
+[vm.default]
+# Default VM runtime limits (override per-instance)
+cpu = 2
+ram = "4GB"
+timeout_minutes = 90
+
+deny_by_default = true
+
