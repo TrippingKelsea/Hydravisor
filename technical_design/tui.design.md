@@ -1,4 +1,3 @@
-
 # Hydravisor – TUI Design Document
 
 **Version:** 0.1.2  
@@ -6,13 +5,13 @@
 
 ---
 
-## 🎯 Purpose
+## 🌟 Purpose
 
-This document outlines the visual and interactive behavior of the Hydravisor terminal interface, built using the `ratatui` crate. It describes UI structure, navigation patterns, state management, and keybinding philosophy for both session and modal modes. It is current as of the 2025-05-29 checkpoint.
+This document outlines the visual and interactive behavior of the Hydravisor terminal interface, built using the `ratatui` crate. It defines UI structure, navigation patterns, state management, modal logic, and keybinding philosophy for both session and modal modes. It is current as of the 2025-05-29 checkpoint.
 
 ---
 
-## 📐 Layout Overview
+## ☑️ Layout Overview
 
 ### Root Application Panes
 ```text
@@ -82,14 +81,16 @@ stateDiagram-v2
 
 ---
 
-## 🎚 Input & Navigation
+## ⌨️ Input & Navigation
 
 ### Navigation Keys (Session Mode)
-- `Tab`: Cycle forward through detail view sub-panes
+- `Tab`: Cycle forward through detail view sub-panes / Cycle focus across panes
 - `Shift-Tab`: Cycle backward through sub-panes
 - `↑/↓`: Scroll list views or text
 - `Enter`: Select focused item
 - `h/j/k/l`: Navigate within current pane
+- `Shift+h`: Previous detail sub-pane
+- `Shift+l`: Next detail sub-pane
 
 ### Action Keys
 - `n`: New VM/container form
@@ -121,7 +122,7 @@ This avoids interfering with default tmux or vim bindings.
 
 ---
 
-## 🔁 Async Event Flow
+## ⚙️ Async Event Flow
 
 Hydravisor uses a central async runtime (`tokio`) to handle non-blocking tasks:
 
@@ -144,6 +145,56 @@ enum UiEvent {
 ```
 Event dispatcher routes messages to subsystem handlers.
 
+### Input Queue & Event Handling
+- Async event queue for all input (model & user)
+- Debounced redraw and scoped pane invalidation
+- TUI input is **immediate-mode**, driven by ratatui's render cycle
+- External model events (e.g., MCP messages) are pushed into event queue with priority flags
+
+---
+
+## 📊 Status Bar
+
+Located at the top of the interface:
+
+```
+[ Mode | Connected Model | Time | Notifications ]
+```
+
+- **Mode**: Normal, Command, Modal
+- **Model**: Currently attached MCP model (if any)
+- **Time**: UTC or user-local
+- **Notifications**: Recent errors or pending actions (log-backed, future)
+
+---
+
+## 🧯 Failure & Resilience Behavior
+
+### Focus Loss
+- No-op; input ignored until focus returns
+
+### Terminal Disconnect
+- Treated as a termination event unless `--headless` is set
+- Cleanup performed on exit
+
+### Application Panic
+- Captures panic hook to log event
+- Ensures cleanup of open logs, session state, and config paths
+- All exit paths must be clean unless underlying system failure
+
+### Terminal Resize
+- Non-blocking redraw
+- Treated as cosmetic; no functional impact for MVP
+
+---
+
+## 🛠 Config Flags (Runtime)
+
+| Flag         | Description                              |
+| ------------ | ---------------------------------------- |
+| `--headless` | Prevent panic-on-disconnect; remote safe |
+| `--no-ui`    | Disable TUI layer entirely               |
+
 ---
 
 ## 🧪 Functional UX Tests
@@ -161,13 +212,14 @@ Event dispatcher routes messages to subsystem handlers.
 
 ## ✏️ Future Extensions
 
-| Feature                     | Status      | Notes                                |
-| --------------------------- | ----------- | ------------------------------------ |
-| Modal overlay hotkey system | In Design   | Shifted VIM-style or Emacs-style TBD |
-| Network topology view       | Deferred    | Custom Ratatui widget                |
-| In-TUI notifications        | Deferred    | Use tracing crate + ring buffer      |
-| Agent role switcher overlay | Deferred    | Must map to policy model             |
-| Policy live reload          | Not Planned | Restart required for config change   |
+| Feature                       | Status      | Notes                                |
+| ----------------------------- | ----------- | ------------------------------------ |
+| Modal overlay hotkey system   | In Design   | Shifted VIM-style or Emacs-style TBD |
+| Network topology view         | Deferred    | Custom Ratatui widget                |
+| In-TUI notifications          | Deferred    | Use tracing crate + ring buffer      |
+| Agent role switcher overlay   | Deferred    | Must map to policy model             |
+| Policy live reload            | Not Planned | Restart required for config change   |
+| Accessibility / Mouse support | Future Work | Out of scope for MVP                 |
 
 ---
 
