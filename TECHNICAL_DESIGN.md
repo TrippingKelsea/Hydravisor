@@ -75,6 +75,47 @@ stateDiagram-v2
 
 ---
 
+## 🎛️ Command vs. Interactive Mode
+
+Hydravisor must not interfere with existing user-defined tmux or terminal keybindings.
+
+### Design Goals
+
+* Separate command mode from application-interactive mode
+* Maintain native tmux and editor workflows
+* Offer intuitive and configurable modifier key setup
+
+### Initial Behavior: Dedicated Session Mode (MVP)
+
+* Hydravisor runs in its own `tmux` window or session
+* All keybindings are local to the Hydravisor window
+* External commands must be issued from within the application pane
+
+### Future Enhancement: Modal Mode (Optional)
+
+* Activated via a double-prefix approach: `C-b` → `C-9` → `{hydravisor-command}`
+* Avoids using `h`, which is often reserved for `help`
+* Proposed rationale: 9 = one less than 10 (Hydravisor has 10 letters); also easy to reach
+* Configurable in `~/.config/hydravisor/config.toml`
+
+```toml
+[interface]
+mode = "session"     # Options: "session" or "modal"
+modal_key = "9"
+```
+
+---
+
+## 🧾 Decision Log
+
+| Date       | Decision                                                         | Rationale                                                                  |
+| ---------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| 2025-05-29 | Use dedicated session for MVP, modal interface as future feature | Simpler input model, easier to implement and test                          |
+| 2025-05-29 | Avoid use of `h` key in modal shortcut                           | Conventionally associated with `help`; conflicts with common muscle memory |
+| 2025-05-29 | Adopt `C-b` → `C-9` as modal entrypoint                          | Uncommon binding, mnemonic for '9 of 10 letters', ergonomic in tmux users  |
+
+---
+
 ## 🧪 Functional Test Parameters
 
 | Component           | Goal                                | Test Criteria                                              |
