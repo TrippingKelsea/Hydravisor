@@ -1,6 +1,6 @@
 # Hydravisor – Interface Architecture Specification
 
-**Version:** 0.1.1  
+**Version:** 0.1.2  
 **File:** `./technical_design/interface.design.md`
 
 ---
@@ -47,9 +47,16 @@ This document details the low-level integration plan between Hydravisor and key 
 - Stream reader for STDOUT/STDERR logging
 
 #### Configuration Notes
-- `~/.config/hydravisor/ssh.toml` to store **per-host SSH profile overrides**
-- Defaults fall back to native `~/.ssh/config`, OpenSSH agent, and provider-level SSH settings
-- Use of ControlMaster encouraged for speed-up
+- `~/.config/hydravisor/ssh.toml` stores **per-host SSH profile overrides**
+- Falls back to standard OpenSSH configurations: `~/.ssh/config`, SSH agent, and provider-specific configs
+- Use of `ControlMaster` recommended for speed-up and connection reuse
+- Hydravisor will generate **per-VM SSH keypairs** by default:
+  - Host keypair: `foo-host`
+  - Client keypair: `foo-client`
+- Keypairs are stored locally under the filesystem-managed Hydravisor directory to avoid centralized key compromise
+
+#### Future Consideration
+- Investigate custom Arch Linux image with pre-trusted host keys during bootstrap
 
 ---
 
