@@ -1,8 +1,15 @@
-# SSH Configuration Design (`ssh.toml`)
+# Hydravisor – SSH Trust & Key Design
 
-## 📜 Purpose
+**Version:** 0.1.2  
+**File:** `./technical_design/ssh.design.md`
 
-The `ssh.toml` configuration file enables per-host SSH profile overrides for Hydravisor-managed virtual machines and containers. This allows the system to securely and flexibly connect to guests without relying solely on global SSH configuration files. It defines how SSH keypairs, trust overrides, and encryption plans are handled inside Hydravisor. It describes how agent/VM isolation is maintained using dedicated key material and how trust is optionally modifiable through configuration.
+---
+
+## 🎯 Purpose
+
+This document defines how SSH keypairs, trust overrides, and encryption plans are handled inside Hydravisor. It describes how agent/VM isolation is maintained using dedicated key material and how trust is optionally modifiable through configuration. The `ssh.toml` configuration file enables per-host SSH profile overrides for Hydravisor-managed virtual machines and containers, allowing the system to securely and flexibly connect to guests without relying solely on global SSH configuration files.
+
+---
 
 ## 📂 File Location
 
@@ -12,6 +19,8 @@ Hydravisor expects this configuration at:
 $XDG_CONFIG_HOME/hydravisor/ssh.toml
 ```
 
+---
+
 ## 🔐 Design Goals
 
 - **Secure Defaults:** Strong identity separation using unique key pairs per VM.
@@ -19,22 +28,39 @@ $XDG_CONFIG_HOME/hydravisor/ssh.toml
 - **Override Control:** Per-host control for port, timeout, and forwarding behavior.
 - **Validation:** Schema-backed to ensure correctness and avoid runtime surprises.
 
-## 🔑 Key Management Strategy
+---
 
-- Each VM is provisioned with a unique SSH keypair.
-  - `foo-vm-client` is the user's identity key for connecting to VM `foo-vm`.
-  - `foo-vm-host` is the host key preloaded into the VM.
-- Keys are stored by default in:
-  
+## 🔐 Key Generation Model
+
+### Per-VM Keypairs
+
+* Each VM gets two unique keypairs:
+  * **Client Keypair**: Used for outbound authentication from VM
+  * **Host Keypair**: Used for inbound SSH access into VM
+* Keys are generated at VM creation time unless overridden
+* Stored at:
+
   ```text
   $XDG_CONFIG_HOME/hydravisor/keys.d/<vm-name>/
   ├── id_ed25519_vm-host
   └── id_ed25519_vm-client
   ```
 
+### Key Management Strategy
+
+- Each VM is provisioned with a unique SSH keypair.
+  - `foo-vm-client` is the user's identity key for connecting to VM `foo-vm`.
+  - `foo-vm-host` is the host key preloaded into the VM.
 - In future releases, this directory may be replaced by an encrypted internal vault filesystem with CLI/API retrieval interfaces.
 
-## 🧾 SSH Profile Format (`ssh.toml`)
+---
+
+## 🛂 Trust Override: `ssh.toml`
+
+* Path: `$XDG_CONFIG_HOME/hydravisor/ssh.toml`
+* Defines explicit overrides to generated keys or permitted agents
+
+### SSH Profile Format
 
 ```toml
 [hosts.foo-vm]
@@ -46,7 +72,16 @@ host_key_check = true
 forward_agent = false
 connect_timeout = 10
 session_timeout = 120
+
+[vm."vm-foo"]
+trusted_agents = ["agent-a"]
+custom_keys = {
+  host = "/path/to/custom_host.key",
+  client = "/path/to/custom_client.key"
+}
 ```
+
+---
 
 ## ⚠️ Missing Config Behavior
 
@@ -55,7 +90,9 @@ session_timeout = 120
   - If that fails, the connection will not proceed.
   - Users will receive a descriptive error and be prompted to run a diagnostic or auto-generate the entry.
 
-## 📑 Schema Validation
+---
+
+## 🧾 Schema Validation
 
 A JSON Schema is provided to validate `ssh.toml` after conversion to JSON:
 
@@ -83,48 +120,6 @@ File: `./schemas/ssh.schema.json`
 }
 ```
 
-## 🔐 Key Generation Model
-
-### Per-VM Keypairs
-
-* Each VM gets two unique keypairs:
-
-  * **Client Keypair**: Used for outbound authentication from VM
-  * **Host Keypair**: Used for inbound SSH access into VM
-* Keys are generated at VM creation time unless overridden
-* Stored at:
-
-  ```text
-  $XDG_CONFIG_HOME/hydravisor/keys.d/<vm-name>/
-  ├── id_ed25519_vm-host
-  └── id_ed25519_vm-client
-  ```
-
----
-
-## 🛂 Trust Override: `ssh.toml`
-
-* Path: `$XDG_CONFIG_HOME/hydravisor/ssh.toml`
-* Defines explicit overrides to generated keys or permitted agents
-
-### Example
-
-```toml
-[vm."vm-foo"]
-trusted_agents = ["agent-a"]
-custom_keys = {
-  host = "/path/to/custom_host.key",
-  client = "/path/to/custom_client.key"
-}
-```
-
----
-
-## 🧾 Schema Validation
-
-* Schema file: `ssh.schema.json`
-* Required for CLI tooling validation
-
 ---
 
 ## 🗃️ Storage Plan
@@ -142,6 +137,15 @@ custom_keys = {
 * Keyed using user-supplied passphrase
 * Failure mode: **fail closed** (do not expose keys)
 
+### Unlock UX
+
+| Method                 | Behavior                              |
+| ---------------------- | ------------------------------------- |
+| `--unlock-store` flag  | CLI prompt for passphrase             |
+| `SSH_STORE_PASSPHRASE` | Environment variable to bypass prompt |
+
+If both are present, env var takes precedence.
+
 ---
 
 ## 🚧 Failure Handling
@@ -151,6 +155,14 @@ custom_keys = {
 | Missing key override        | Auto-generate securely            |
 | Invalid key format          | Validation error on load          |
 | Encrypted store unavailable | Refuse to start affected sessions |
+
+---
+
+## 🚫 Limitations
+
+* Key trust model is **local-only**; no multi-node sync supported
+* No SSH CA or certificate-based trust (future possible)
+* Encrypted key store is a planned feature, not required for MVP
 
 ---
 
@@ -170,5 +182,5 @@ custom_keys = {
 
 ---
 
-Document maintained as part of the Hydravisor Project.
+Document maintained as part of the Hydravisor Project.  
 Author: Kelsea + Alethe · 2025
