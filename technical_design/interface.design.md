@@ -48,15 +48,28 @@ This document details the low-level integration plan between Hydravisor and key 
 
 #### Configuration Notes
 - `~/.config/hydravisor/ssh.toml` stores **per-host SSH profile overrides**
-- Falls back to standard OpenSSH configurations: `~/.ssh/config`, SSH agent, and provider-specific configs
+- If no matching configuration is found, Hydravisor will fall back to standard OpenSSH configurations: `~/.ssh/config`, SSH agent, and provider-specific configs
+- If fallback is unsuccessful or invalid, a user prompt will be triggered to select or define an appropriate connection strategy
 - Use of `ControlMaster` recommended for speed-up and connection reuse
 - Hydravisor will generate **per-VM SSH keypairs** by default:
-  - Host keypair: `foo-host`
-  - Client keypair: `foo-client`
-- Keypairs are stored locally under the filesystem-managed Hydravisor directory to avoid centralized key compromise
+  - Host keypair: `foo-host` && `foo-host.pub`
+  - Client keypair: `foo-client` && `foo-client.pub`
+- Keypairs are stored locally within the Hydravisor-managed application directory using an **encrypted virtual filesystem volume**.
+- Keys are retrievable via Hydravisor CLI and API for authorized users.
+- This provides isolation per-VM, reduces blast radius in case of key compromise, and avoids reliance on shared global secrets.
 
-#### Future Consideration
+#### Future Considerations
 - Investigate custom Arch Linux image with pre-trusted host keys during bootstrap
+
+### 🔮 Future Work: Arch Image Customization
+We plan to explore using a base Arch Linux image preconfigured with Hydravisor-specific trust anchors and bootstrap tooling:
+
+- Inject VM host/client keypairs at image build time
+- Pre-authorize the client keys in the guest's `~/.ssh/authorized_keys`
+- Embed initialization hooks to register MCP agents automatically post-boot
+- Maintain template image via reproducible build process
+
+This would significantly simplify secure deployments and key distribution, while ensuring every VM instance starts in a known-good, trusted state.
 
 ---
 
@@ -171,4 +184,3 @@ This document details the low-level integration plan between Hydravisor and key 
 | containerd    | gRPC socket auth          | Yes        | Task logs, metrics     | `containerd-client`  |
 | Ollama        | Local socket              | Yes        | Token stream           | HTTP or `ollama-rs`  |
 | Bedrock       | IAM (SigV4)               | Yes        | Req/resp stream        | `aws-sdk-bedrock`    |
-
