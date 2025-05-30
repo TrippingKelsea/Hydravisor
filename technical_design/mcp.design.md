@@ -1,13 +1,13 @@
 # MCP Message Design for Hydravisor
 
-**Version:** 0.1.0
+**Version:** 0.1.2  
 **File:** `./mcp.design.md`
 
 ---
 
 ## 🎯 Purpose
 
-This document specifies the structure, semantics, and message flow design of the Model Context Protocol (MCP) as used within Hydravisor. It serves as a schema contract for agent interaction, AI orchestration, and VM lifecycle messaging.
+This document specifies the structure, semantics, and message flow design of the Model Context Protocol (MCP) as used within Hydravisor. It serves as a schema contract for agent interaction, AI orchestration, and VM lifecycle messaging. It defines the Model Context Protocol (MCP) used within Hydravisor to enable structured, secure message routing between local agents, AI models, and virtual machines. It formalizes the semantics of session scope, command structure, routing logic, and policy enforcement.
 
 ---
 
@@ -94,15 +94,72 @@ All MCP messages are JSON-encoded, with a required `type` field and optional `me
 
 ---
 
-## 🔐 Security Considerations
+## 🧭 Routing Architecture
 
-Each message should be wrapped with metadata from Hydravisor’s session enforcement layer:
+### Entities
 
-* `agent_fingerprint`
-* `role` (e.g., `trusted`, `sandboxed`, `audited`)
-* Optional signature or HMAC value
+* **Agent**: A user-facing or automated process initiating requests.
+* **VM**: A containerized or virtualized workload.
+* **Model**: Local or remote LLM-like compute.
 
-Hydravisor will deny messages violating ACLs or originating from unauthorized roles.
+### Flow Model
+
+```
+Agent → MCP Dispatcher → Target VM or Model
+                     ↘ Logs, Audit Queue, UI Hooks
+```
+
+Each route is evaluated for permission via `policy.toml`, and unauthorized routes are blocked before transmission.
+
+---
+
+## 📦 Command Structure
+
+### Envelope Format
+
+```json
+{
+  "src": "agent-a",
+  "dst": "vm-foo",
+  "type": "vm/exec",
+  "payload": { "command": "ls -alh" }
+}
+```
+
+### Common Command Types
+
+| Type         | Payload Schema          | Description                       |
+| ------------ | ----------------------- | --------------------------------- |
+| `vm/exec`    | `{command: String}`     | Execute shell command             |
+| `vm/attach`  | `{terminal_id: String}` | Bind model to VM terminal session |
+| `vm/info`    | `{}`                    | Request current VM metadata       |
+| `model/send` | `{text: String}`        | Forward message to attached model |
+| `log/query`  | `{session_id: String}`  | Retrieve past session logs        |
+
+---
+
+## 🛡️ Policy Scoping & Enforcement
+
+* All commands must pass authz check:
+
+  * `src` must be explicitly allowed by both `agent` and `vm` config
+  * `type` must not exceed scope of agent role (e.g., `sandboxed` agents blocked from `vm/exec`)
+* Deny-by-default if:
+
+  * Any field is missing
+  * Command type is undefined
+  * Agent or VM is unrecognized
+
+---
+
+## ⏳ Session Scoping
+
+* Each MCP session is:
+
+  * Bound to a unique agent ↔ VM relationship
+  * Assigned an internal `session_id` for tracking logs, models, messages
+* Agents may operate across **multiple concurrent sessions** (configurable default: 10)
+* Sessions are ephemeral but loggable
 
 ---
 
@@ -118,6 +175,49 @@ Hydravisor will deny messages violating ACLs or originating from unauthorized ro
   "message": "Access denied: insufficient role permissions"
 }
 ```
+
+---
+
+## 🔐 Security Considerations
+
+Each message should be wrapped with metadata from Hydravisor’s session enforcement layer:
+
+* `agent_fingerprint`
+* `role` (e.g., `trusted`, `sandboxed`, `audited`)
+* Optional signature or HMAC value
+
+Hydravisor will deny messages violating ACLs or originating from unauthorized roles.
+
+---
+
+## 🔄 Failure & Fallback
+
+| Error Type           | Response Behavior            |
+| -------------------- | ---------------------------- |
+| Invalid route        | Log error, respond to sender |
+| Unauthorized command | Deny and audit               |
+| Unavailable target   | Respond with 503-equivalent  |
+| Parsing/format error | Respond with 400-equivalent  |
+
+Internal messages may surface to the user via the TUI (future work), and always emit to log stream.
+
+---
+
+## 🔐 Security Guarantees
+
+* No implicit trust across sessions
+* Agent role is scoped and enforced per command
+* Command logs include full envelope for audit
+* Model access must be explicitly attached and policy-approved
+
+---
+
+## 🔮 Future Extensions
+
+* Command chaining (`pipe` or `macro`) support
+* Agent ↔ Agent messaging
+* Rate limits or budgeted model access
+* JSON Schema validation for command payloads
 
 ---
 
