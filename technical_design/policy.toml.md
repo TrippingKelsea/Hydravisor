@@ -2,12 +2,28 @@
 
 This document defines the schema, usage, and example for `policy.toml`, which governs runtime security and access control within Hydravisor.
 
-**Location**: `.$XDG_HOME/hydravisor/policy.toml`  
+**Location**: `$XDG_CONFIG_HOME/hydravisor/policy.toml`  
 **Schema**: See [`./technical_design/policy.schema.json`](./technical_design/policy.schema.json)
 
 ---
 
+## 📖 Purpose
+
+This document defines the structure, semantics, and enforcement rules for `policy.toml`, the central trust policy file used in Hydravisor. It describes field-level expectations, validation rules, and behavior during command execution.
+
+---
+
+## 🗂️ File Location & Format
+
+* **Path**: `$XDG_CONFIG_HOME/hydravisor/policy.toml`
+* **Format**: [TOML](https://toml.io/en/) 1.0
+* **Schema**: Validated against `policy.schema.json`
+
+---
+
 ## 🧱 Structure Overview
+
+### Role-Based Configuration
 
 ```toml
 [roles.trusted]
@@ -30,6 +46,66 @@ can_create = false
 can_attach_terminal = false
 audited = true
 ```
+
+### VM and Agent-Specific Configuration
+
+```toml
+[vm."vm-name"]
+trusted = true
+agents = ["agent-a", "agent-b"]
+
+[agent."agent-a"]
+role = "trusted"
+allow = ["vm-name"]
+deny = []
+
+[agent."agent-b"]
+role = "sandboxed"
+allow = []
+deny = ["vm-name"]
+```
+
+### Top-Level Sections
+
+* `[vm."<name>"]` — Configuration for each VM
+* `[agent."<id>"]` — Configuration for each agent
+
+### Fields
+
+| Field                              | Section     | Type    | Required | Description                                                          |
+| ---------------------------------- | ----------- | ------- | -------- | -------------------------------------------------------------------- |
+| `roles.<role>`                     |             | table   | yes      | Defines capabilities per role (`trusted`, `sandboxed`, `audited`)    |
+| `roles.<role>.can_create`          |             | boolean | yes      | Whether the role can create VMs or containers                        |
+| `roles.<role>.can_attach_terminal` |             | boolean | yes      | Whether the role can attach to terminal sessions                     |
+| `roles.<role>.audited`             |             | boolean | yes      | Whether all actions by this role are logged                          |
+| `permissions.<agent>`              |             | table   | no       | Optional override for specific agent identity (e.g., `model:llama3`) |
+| `trusted`                          | `[vm.*]`    | bool    | yes      | Declares VM as internally trusted                                    |
+| `agents`                           | `[vm.*]`    | array   | yes      | List of agent IDs allowed to interact                                |
+| `role`                             | `[agent.*]` | string  | yes      | Must be `trusted`, `sandboxed`, or `audited`                         |
+| `allow`                            | `[agent.*]` | array   | yes      | Explicit allowlist of VM IDs                                         |
+| `deny`                             | `[agent.*]` | array   | yes      | Explicit denylist of VM IDs                                          |
+
+---
+
+## 🔒 Enforcement Logic
+
+* All MCP commands must pass authorization via this policy file.
+* Authorization checks combine:
+
+  * Host VM policy (e.g., `trusted = true`)
+  * Agent intent (`allow` vs `deny`)
+* **No implicit escalation**: Missing fields default to deny.
+
+### Precedence Table
+
+| Host Policy    | Agent Policy   | Result  |
+| -------------- | -------------- | ------- |
+| Implicit Deny  | Implicit Deny  | ❌ Deny  |
+| Implicit Deny  | Explicit Allow | ✅ Allow |
+| Explicit Deny  | Implicit Allow | ❌ Deny  |
+| Explicit Deny  | Explicit Allow | ❌ Deny  |
+| Explicit Allow | Explicit Allow | ✅ Allow |
+| Implicit Allow | Explicit Allow | ✅ Allow |
 
 ---
 
@@ -92,25 +168,53 @@ Hydravisor enforces a **deny-by-default** policy. If no role or override is spec
 
 ---
 
-## 🧪 Testing
+## 🧪 Schema Validation
 
-To validate a `policy.toml` file, use the JSON schema available at:
+* **File**: `policy.schema.json`
+* Tooling: `hydravisor policy validate`
+* Validation includes:
 
+  * Allowed roles only
+  * Unique names
+  * Matching references between agent and VM blocks
+
+---
+
+## 🛠 CLI Tooling
+
+### `hydravisor policy validate`
+
+* Validate structure against JSON Schema
+
+### `hydravisor policy check`
+
+* Simulate authorization decision between agent and VM
+
+Example:
+
+```sh
+$ hydravisor policy check --agent agent-a --vm vm-name
+✔ Allowed
 ```
-./technical_design/policy.schema.json
-```
 
-You can use tools such as:
+---
 
-```bash
-toml2json policy.toml | ajv validate -s policy.schema.json -d -
-```
+## 🧠 Design Principles
 
-This ensures the structure is correct **before launch time.**
+* Immutable during runtime (no live reload)
+* Manual edit with clear structure
+* No policy mutations allowed via UI or MCP
+* Future versioning and diff audit is external to core tool
+
+---
+
+## 📌 Future Enhancements
+
+* Role inheritance support (planned post-MVP)
+* Optional role capabilities (`exec`, `record`, `vm/attach`) per agent
+* Policy change watcher + trigger system
 
 ---
 
 Document maintained as part of the Hydravisor Project.
 Author: Kelsea + Alethe · 2025
-
-
