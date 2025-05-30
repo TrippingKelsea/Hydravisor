@@ -47,6 +47,27 @@ Hydravisor is designed with AI containment, auditability, and user isolation as 
 | Valid token attaches to VM terminal session | tmux session established with role-limited privileges |
 | Log integrity test under model control      | Checksum mismatch triggers alert or lockdown          |
 
+
+### 🔐 Runtime Policy File
+
+Hydravisor enforces its security posture through a structured runtime policy located at:
+
+```
+.$XDG_HOME/hydravisor/policy.toml
+```
+
+This file defines:
+
+* **Agent Roles** (`trusted`, `sandboxed`, `audited`)
+* **Permission Sets** (e.g., `create_vm`, `attach_terminal`)
+* **Audit Logging Rules**
+* **Default VM Resource Limits**
+* **tmux Session Recording Behavior**
+
+Each model or agent can be individually classified and constrained. The policy enforces a `deny_by_default` strategy and supports detailed logging for `audited` roles.
+
+> See [`./technical_design/policy.toml`](./technical_design/policy.toml) for the complete schema and example configuration.
+
 ---
 
 ## 🔗 MCP Integration Design

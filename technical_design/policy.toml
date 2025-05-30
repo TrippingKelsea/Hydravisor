@@ -1,48 +1,78 @@
-# ~/.config/hydravisor/policy.toml
+# Hydravisor Runtime Policy Configuration
+# Location: $XDG_CONFIG_HOME/hydravisor/policy.toml
 
-# Hydravisor Security Policy File
-# Defines access controls for agents and models interacting with the system
+# ===============================
+# 🚦 Agent Role Classifications
+# ===============================
+# Define roles and default behaviors for each type of AI agent or user.
+# These influence access control, sandboxing, and audit scope.
 
 [roles]
-# Classify agents by trust level
-# Options: trusted, sandboxed, audited
-"ollama:llama3" = "trusted"
-"bedrock:claude" = "audited"
-"open-web-ui" = "sandboxed"
 
-[permissions.trusted]
-create_vm = true
-attach_terminal = true
-access_peer_vm = false
-use_credentials = true
+# Trusted agents can launch and access VMs, but are still logged.
+trusted = { can_create = true, can_attach_terminal = true, audited = false }
 
-[permissions.sandboxed]
-create_vm = false
-attach_terminal = false
-access_peer_vm = false
-use_credentials = false
+# Sandboxed agents have highly restricted access.
+sandboxed = { can_create = false, can_attach_terminal = false, audited = true }
 
-[permissions.audited]
-create_vm = true
-attach_terminal = true
-access_peer_vm = false
-use_credentials = false
-log_all_commands = true
+# Audited agents may have access but are fully logged and require user approval.
+audited = { can_create = true, can_attach_terminal = true, audited = true }
+
+# ===============================
+# 🔐 Permissions Overrides
+# ===============================
+# Fine-grained permissions for specific agents or fingerprints.
+# These override default role behavior when matched.
+
+[permissions]
+
+# Example agent fingerprint (could be public key or UUID)
+"agent::b312a9f8" = { role = "audited", override = { can_attach_terminal = false } }
+
+# ===============================
+# 🕵️ Audit Settings
+# ===============================
+# Control how and when audit logs are created.
 
 [audit]
-# Where to store per-agent audit logs (relative to Hydravisor config dir)
-directory = "audit_logs"
-enabled = true
 
-[tmux]
-record_sessions = true
-log_path = "logs"
+# Log all denied actions (recommended)
+log_denied = true
 
-[vm.default]
-# Default VM runtime limits (override per-instance)
-cpu = 2
-ram = "4GB"
-timeout_minutes = 90
+# Log all approved actions for 'audited' roles
+log_approved_for_roles = ["audited"]
 
-deny_by_default = true
+# Where to store audit logs (relative to $XDG_DATA_HOME or absolute)
+log_path = "hydravisor/logs/audit.jsonl"
+
+# ===============================
+# 🧠 Default VM Resource Limits
+# ===============================
+# Prevent runaway resource allocation by untrusted agents
+
+[defaults.vm]
+
+cpu_limit = 2               # Max vCPUs for auto-provisioned VMs
+ram_limit = "4GB"           # Max RAM allocation
+disk_limit = "16GB"         # Max disk size (if applicable)
+networking = false          # Should the VM have network access?
+
+# ===============================
+# 🎥 Session Recording Rules
+# ===============================
+# Controls when and how terminal sessions are recorded
+
+[recording]
+
+# Always record for sandboxed or audited roles
+record_for_roles = ["sandboxed", "audited"]
+
+# Include model input/output dialog in the recording log
+include_model_dialog = true
+
+# Where to store terminal recordings (overrides default path if set)
+log_dir = "hydravisor/logs/sessions"
+
+# Optional: redact sensitive output patterns (regex list)
+redact_patterns = ["password\\s*=", "api_key\\s*="]
 
