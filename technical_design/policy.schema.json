@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hydravisor Policy Schema",
+  "type": "object",
+  "required": ["roles", "permissions", "audit", "defaults", "recording"],
+  "properties": {
+    "roles": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-z]+$": {
+          "type": "object",
+          "properties": {
+            "can_create": { "type": "boolean" },
+            "can_attach_terminal": { "type": "boolean" },
+            "audited": { "type": "boolean" }
+          },
+          "required": ["can_create", "can_attach_terminal", "audited"]
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "patternProperties": {
+        "^agent::[a-z0-9]+$": {
+          "type": "object",
+          "properties": {
+            "role": { "type": "string" },
+            "override": {
+              "type": "object",
+              "properties": {
+                "can_create": { "type": "boolean" },
+                "can_attach_terminal": { "type": "boolean" }
+              }
+            }
+          },
+          "required": ["role"]
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "properties": {
+        "log_denied": { "type": "boolean" },
+        "log_approved_for_roles": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "log_path": { "type": "string" }
+      },
+      "required": ["log_denied", "log_path"]
+    },
+    "defaults": {
+      "type": "object",
+      "properties": {
+        "vm": {
+          "type": "object",
+          "properties": {
+            "cpu_limit": { "type": "integer" },
+            "ram_limit": { "type": "string" },
+            "disk_limit": { "type": "string" },
+            "networking": { "type": "boolean" }
+          },
+          "required": ["cpu_limit", "ram_limit", "disk_limit"]
+        }
+      }
+    },
+    "recording": {
+      "type": "object",
+      "properties": {
+        "record_for_roles": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "include_model_dialog": { "type": "boolean" },
+        "log_dir": { "type": "string" },
+        "redact_patterns": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["record_for_roles", "include_model_dialog"]
+    }
+  }
+}
+
