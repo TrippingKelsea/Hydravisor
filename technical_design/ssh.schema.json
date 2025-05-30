@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hydravisor SSH Configuration",
+  "type": "object",
+  "properties": {
+    "hosts": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-zA-Z0-9-_]+$": {
+          "type": "object",
+          "properties": {
+            "address": {
+              "type": "string",
+              "format": "hostname"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "username": {
+              "type": "string"
+            },
+            "identity_file": {
+              "type": "string"
+            },
+            "host_key_check": {
+              "type": "boolean"
+            },
+            "forward_agent": {
+              "type": "boolean"
+            },
+            "connect_timeout": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "session_timeout": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": ["address", "username", "identity_file"],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["hosts"],
+  "additionalProperties": false
+}
+
