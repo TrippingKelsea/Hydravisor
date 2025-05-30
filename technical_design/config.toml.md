@@ -77,7 +77,7 @@ heartbeat_interval = 15
 ---
 
 ## 🛡 Validation Rules
-- `mode` must be one of: `"session"`, `"modal"`
+- `mode` must be one of: "session", "modal"
 - `modal_key` should be a single digit or letter (tmux-compatible)
 - RAM must be parseable as a quantity (e.g., `4GB`, `512MB`)
 - `ollama.path` must be executable if `enabled = true`
@@ -147,12 +147,21 @@ hydravisor logs view --session=llama-sandbox-2025-05-29
 
 ### `hydravisor logs export`
 Export logs to a target directory or convert to playback format.
+
+Supports export to:
+- `cast`: [Asciinema](https://asciinema.org/) v2-compatible `.cast` files for terminal session replay.
+- `jsonl`: Structured JSON lines.
+- `ansi`: Raw ANSI escape-formatted logs.
+
 ```bash
 hydravisor logs export --session=llama-sandbox-2025-05-29 --format=cast --output=./exports
 ```
 
 ### `hydravisor audit verify`
-Validate the integrity of audit logs using cryptographic hashes.
+Validate the integrity of audit logs using cryptographic hashes (SHA256).
+
+Each session’s metadata includes a manifest file containing hashes of each log file. This command recalculates those hashes and compares them to ensure logs were not tampered with.
+
 ```bash
 hydravisor audit verify --session=llama-sandbox-2025-05-29
 ```
@@ -181,6 +190,8 @@ hydravisor model attach --session=llama-sandbox --model=ollama:mistral
 
 ### `hydravisor tui`
 Launch the Hydravisor terminal UI.
+
+If the config file is missing or malformed, Hydravisor will fail gracefully by launching with safe default values and emitting a descriptive error to the log.
 ```bash
 hydravisor tui
 ```
