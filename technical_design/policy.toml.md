@@ -1,4 +1,7 @@
-# Hydravisor Runtime Policy File
+# Hydravisor – Policy File Documentation
+
+**Version:** 0.1.2  
+**File:** `./technical_design/policy.toml.md`
 
 This document defines the schema, usage, and example for `policy.toml`, which governs runtime security and access control within Hydravisor.
 
@@ -70,20 +73,23 @@ deny = ["vm-name"]
 * `[vm."<name>"]` — Configuration for each VM
 * `[agent."<id>"]` — Configuration for each agent
 
-### Fields
+---
 
-| Field                              | Section     | Type    | Required | Description                                                          |
-| ---------------------------------- | ----------- | ------- | -------- | -------------------------------------------------------------------- |
-| `roles.<role>`                     |             | table   | yes      | Defines capabilities per role (`trusted`, `sandboxed`, `audited`)    |
-| `roles.<role>.can_create`          |             | boolean | yes      | Whether the role can create VMs or containers                        |
-| `roles.<role>.can_attach_terminal` |             | boolean | yes      | Whether the role can attach to terminal sessions                     |
-| `roles.<role>.audited`             |             | boolean | yes      | Whether all actions by this role are logged                          |
-| `permissions.<agent>`              |             | table   | no       | Optional override for specific agent identity (e.g., `model:llama3`) |
-| `trusted`                          | `[vm.*]`    | bool    | yes      | Declares VM as internally trusted                                    |
-| `agents`                           | `[vm.*]`    | array   | yes      | List of agent IDs allowed to interact                                |
-| `role`                             | `[agent.*]` | string  | yes      | Must be `trusted`, `sandboxed`, or `audited`                         |
-| `allow`                            | `[agent.*]` | array   | yes      | Explicit allowlist of VM IDs                                         |
-| `deny`                             | `[agent.*]` | array   | yes      | Explicit denylist of VM IDs                                          |
+## 🔍 Field Definitions
+
+| Field                              | Section     | Type             | Required | Description                                                          |
+| ---------------------------------- | ----------- | ---------------- | -------- | -------------------------------------------------------------------- |
+| `roles.<role>`                     |             | table            | yes      | Defines capabilities per role (`trusted`, `sandboxed`, `audited`)    |
+| `roles.<role>.can_create`          |             | boolean          | yes      | Whether the role can create VMs or containers                        |
+| `roles.<role>.can_attach_terminal` |             | boolean          | yes      | Whether the role can attach to terminal sessions                     |
+| `roles.<role>.audited`             |             | boolean          | yes      | Whether all actions by this role are logged                          |
+| `permissions.<agent>`              |             | table            | no       | Optional override for specific agent identity (e.g., `model:llama3`) |
+| `trusted`                          | `[vm.*]`    | bool             | yes      | Declares VM as internally trusted                                    |
+| `agents`                           | `[vm.*]`    | array            | yes      | List of agent IDs allowed to interact                                |
+| `role`                             | `[agent.*]` | string           | yes      | Must be `trusted`, `sandboxed`, or `audited`                         |
+| `allow`                            | `[agent.*]` | array            | yes      | Explicit allowlist of VM IDs                                         |
+| `deny`                             | `[agent.*]` | array            | yes      | Explicit denylist of VM IDs                                          |
+| `capabilities`                     | `[agent.*]` | array (optional) | no       | Future field for fine-grained permissions                            |
 
 ---
 
@@ -91,7 +97,6 @@ deny = ["vm-name"]
 
 * All MCP commands must pass authorization via this policy file.
 * Authorization checks combine:
-
   * Host VM policy (e.g., `trusted = true`)
   * Agent intent (`allow` vs `deny`)
 * **No implicit escalation**: Missing fields default to deny.
@@ -106,18 +111,6 @@ deny = ["vm-name"]
 | Explicit Deny  | Explicit Allow | ❌ Deny  |
 | Explicit Allow | Explicit Allow | ✅ Allow |
 | Implicit Allow | Explicit Allow | ✅ Allow |
-
----
-
-## 🔍 Field Definitions
-
-| Field                              | Type    | Required | Description                                                          |
-| ---------------------------------- | ------- | -------- | -------------------------------------------------------------------- |
-| `roles.<role>`                     | table   | yes      | Defines capabilities per role (`trusted`, `sandboxed`, `audited`)    |
-| `roles.<role>.can_create`          | boolean | yes      | Whether the role can create VMs or containers                        |
-| `roles.<role>.can_attach_terminal` | boolean | yes      | Whether the role can attach to terminal sessions                     |
-| `roles.<role>.audited`             | boolean | yes      | Whether all actions by this role are logged                          |
-| `permissions.<agent>`              | table   | no       | Optional override for specific agent identity (e.g., `model:llama3`) |
 
 ---
 
@@ -140,6 +133,20 @@ can_create = false
 can_attach_terminal = true
 audited = true
 ```
+
+---
+
+## 🧮 Role vs Command Matrix (Partial, Extensible)
+
+This is a placeholder mapping to define default command permissions per role.
+
+| Role        | Allowed Command Types                                        |
+| ----------- | ------------------------------------------------------------ |
+| `trusted`   | `vm/exec`, `vm/attach`, `vm/info`, `log/query`, `model/send` |
+| `sandboxed` | `vm/info`, `model/send`, `log/query`                         |
+| `audited`   | `vm/exec` (with recording), `log/query`                      |
+
+> This matrix is a starting point and is subject to future extension. Future versions may enforce this via schema or capabilities list.
 
 ---
 
@@ -173,10 +180,10 @@ Hydravisor enforces a **deny-by-default** policy. If no role or override is spec
 * **File**: `policy.schema.json`
 * Tooling: `hydravisor policy validate`
 * Validation includes:
-
   * Allowed roles only
   * Unique names
   * Matching references between agent and VM blocks
+  * Recognition of optional `capabilities` array (no enforcement yet)
 
 ---
 
@@ -216,5 +223,5 @@ $ hydravisor policy check --agent agent-a --vm vm-name
 
 ---
 
-Document maintained as part of the Hydravisor Project.
+Document maintained as part of the Hydravisor Project.  
 Author: Kelsea + Alethe · 2025
