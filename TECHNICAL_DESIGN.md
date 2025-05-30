@@ -60,13 +60,13 @@ Hydravisor serves as both an MCP client and MCP server to facilitate collaborati
 ```mermaid
 graph LR
     subgraph Local
-        A[MCP Client (Local Model)]
+        A[MCP Client Local Model]
     end
     subgraph Hydravisor
         B[MCP Proxy Server + TUI + Orchestrator]
     end
     subgraph Guest VM
-        C[MCP Daemon (Native)]
+        C[MCP Daemon Native]
     end
     A --> B --> C
 ```
@@ -75,7 +75,7 @@ graph LR
 
 ```mermaid
 graph TD
-    A[Hydravisor MCP Client (Model)] --> B[VM Control Layer]
+    A[Hydravisor MCP Client Model] --> B[VM Control Layer]
     B --> C1[Create VM]
     B --> C2[Delete VM]
     B --> C3[Attach Model]
