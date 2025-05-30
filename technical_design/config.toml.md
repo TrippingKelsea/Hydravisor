@@ -1,12 +1,11 @@
 # Hydravisor – Configuration File Spec
 
-**Version:** 0.1.0
+**Version:** 0.1.0  
 **File:** `./technical_design/config.toml.md`
 
 ---
 
 ## 🎯 Purpose
-
 This document defines the format and behavior of Hydravisor’s primary configuration file, `config.toml`. This file governs runtime behavior, UI preferences, default providers, and system-wide defaults.
 
 Location: `$XDG_CONFIG_HOME/hydravisor/config.toml`
@@ -16,7 +15,6 @@ Location: `$XDG_CONFIG_HOME/hydravisor/config.toml`
 ## 🔧 Configuration Fields
 
 ### `[interface]`
-
 ```toml
 [interface]
 mode = "session"      # Options: "session" or "modal"
@@ -25,7 +23,6 @@ refresh_interval_ms = 500   # How often UI refreshes (in ms)
 ```
 
 ### `[defaults]`
-
 ```toml
 [defaults]
 default_vm_image = "ubuntu-22.04"
@@ -36,7 +33,6 @@ default_ram = "4GB"
 ```
 
 ### `[providers.ollama]`
-
 ```toml
 [providers.ollama]
 enabled = true
@@ -45,7 +41,6 @@ models = ["llama3", "mistral", "codellama"]
 ```
 
 ### `[providers.bedrock]`
-
 ```toml
 [providers.bedrock]
 enabled = true
@@ -54,7 +49,6 @@ profile = "default"
 ```
 
 ### `[logging]`
-
 ```toml
 [logging]
 level = "info"           # Options: "debug", "info", "warn", "error"
@@ -64,7 +58,6 @@ retain_days = 14
 ```
 
 ### `[tmux]`
-
 ```toml
 [tmux]
 session_prefix = "hydravisor-"
@@ -74,7 +67,6 @@ autosave_on_exit = true
 ```
 
 ### `[mcp]`
-
 ```toml
 [mcp]
 socket_path = "/tmp/hydravisor.sock"
@@ -85,18 +77,16 @@ heartbeat_interval = 15
 ---
 
 ## 🛡 Validation Rules
-
-* `mode` must be one of: `"session"`, `"modal"`
-* `modal_key` should be a single digit or letter (tmux-compatible)
-* RAM must be parseable as a quantity (e.g., `4GB`, `512MB`)
-* `ollama.path` must be executable if `enabled = true`
-* `bedrock.profile` must match a valid AWS profile in `~/.aws/config`
-* Log paths must be writable; fail fast if not
+- `mode` must be one of: `"session"`, `"modal"`
+- `modal_key` should be a single digit or letter (tmux-compatible)
+- RAM must be parseable as a quantity (e.g., `4GB`, `512MB`)
+- `ollama.path` must be executable if `enabled = true`
+- `bedrock.profile` must match a valid AWS profile in `~/.aws/config`
+- Log paths must be writable; fail fast if not
 
 ---
 
 ## ✅ Example Configuration
-
 ```toml
 [interface]
 mode = "modal"
@@ -135,6 +125,64 @@ autosave_on_exit = true
 socket_path = "/tmp/hydravisor.sock"
 timeout_ms = 2000
 heartbeat_interval = 10
+```
+
+---
+
+## 🧪 CLI Commands for Logging & Auditing
+
+Hydravisor provides a CLI to interact with log files, audit events, and terminal recordings.
+
+### `hydravisor logs list`
+List all recorded sessions or VM/container lifecycle events.
+```bash
+hydravisor logs list --type=vm --limit=10
+```
+
+### `hydravisor logs view`
+Show the contents of a specific log file.
+```bash
+hydravisor logs view --session=llama-sandbox-2025-05-29
+```
+
+### `hydravisor logs export`
+Export logs to a target directory or convert to playback format.
+```bash
+hydravisor logs export --session=llama-sandbox-2025-05-29 --format=cast --output=./exports
+```
+
+### `hydravisor audit verify`
+Validate the integrity of audit logs using cryptographic hashes.
+```bash
+hydravisor audit verify --session=llama-sandbox-2025-05-29
+```
+
+---
+
+## ⚙️ Additional CLI Commands (Draft)
+
+### `hydravisor vm create`
+Provision a new VM using default or supplied parameters.
+```bash
+hydravisor vm create --name=llama-sandbox --cpu=4 --ram=8GB --os=ubuntu-22.04 --model=ollama:llama3
+```
+
+### `hydravisor vm delete`
+Shut down and delete a running or stopped VM.
+```bash
+hydravisor vm delete --name=llama-sandbox
+```
+
+### `hydravisor model attach`
+Attach a local or remote model to a running terminal session.
+```bash
+hydravisor model attach --session=llama-sandbox --model=ollama:mistral
+```
+
+### `hydravisor tui`
+Launch the Hydravisor terminal UI.
+```bash
+hydravisor tui
 ```
 
 ---
