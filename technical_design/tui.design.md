@@ -1,6 +1,6 @@
 # Hydravisor – TUI Design Document
 
-**Version:** 0.1.1  
+**Version:** 0.1.2  
 **File:** `./technical_design/tui.design.md`
 
 ---
@@ -35,9 +35,30 @@ This document outlines the visual and interactive behavior of the Hydravisor ter
   - Network Connections
   - Running Agents
   - Agent Details / Logs
+  - Local Ollama Models
 - **Dialog Interface:** Dedicated pane for current model interaction (chat/message-based)
 
 Note: The entire UI exists in the native application window. Modal overlays are excluded from this scope and will be considered in future revisions.
+
+---
+
+## 🔁 TUI Enhancements
+
+### 🔍 View Expansion
+- **MCP Connections View**: Adds a new tabbed pane to display active Model Context Protocol sessions.
+- **Running Agents Panel**: Displays all active model agents and their assigned VMs or containers.
+- **Local Ollama Models Panel**: Lists available local LLMs and their readiness state.
+
+### 🔄 Pane Switching Logic
+- Main right-side detail pane is swappable:
+  - **VM/container list context**: cycles through Info, Logs, MCP connections, Network.
+  - **MCP connection list**: switches between Connection Details, Logs.
+  - **Agent list**: switches between Agent Details, Logs.
+
+### 🌐 Modal Overlay Mode
+- Reserved for future development.
+- Non-intrusive pop-up summary, alert, or command overlays.
+- Will not support deep interaction.
 
 ---
 
@@ -71,6 +92,7 @@ stateDiagram-v2
 - `t`: Attach terminal to instance
 - `a`: Open dialog with model ("attach model")
 - `q`: Close current pane or dialog
+- `d`: Detach model or close session
 
 ---
 
