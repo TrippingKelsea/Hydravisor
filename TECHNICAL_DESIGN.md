@@ -1,10 +1,13 @@
 # Hydravisor – Technical Design Document
 
-**Version:** 0.1.0
+**Version:** 0.1.2  
+**File:** `./technical_design/TECHNICAL_DESIGN.md`
+
+---
 
 ## 🎯 Purpose
 
-This document outlines the architecture, dependencies, module interactions, and verification criteria for Hydravisor: a TUI-based virtualization and AI model management tool written in Rust.
+This document outlines the architecture, dependencies, module interactions, and verification criteria for Hydravisor: a TUI-based virtualization and AI model management tool written in Rust. It defines the architecture and key technical subsystems of the Hydravisor platform, covering session orchestration, terminal UI structure, security policy management, and interaction protocols for agent, model, and container lifecycles. It reflects design decisions finalized as of 2025-05-29.
 
 ---
 
@@ -17,6 +20,21 @@ Hydravisor is composed of:
 * Model adapters for Ollama (local) and Amazon Bedrock (remote)
 * Integrated `tmux` session handler for shared user/AI environments
 * Model Context Protocol (MCP) client/server interface for coordinating AI agents
+
+### Core Components
+
+* **TUI Layer**: Built on `ratatui`, supports modal input, event queue, and live pane rendering.
+* **Session Manager**: Orchestrates lifecycle of VMs, agents, and models.
+* **Policy Engine**: Validates all commands via declarative `policy.toml`.
+* **Logging Subsystem**: Records all sessions in `.cast`, `.jsonl`, and `.log` formats.
+* **MCP Dispatcher**: Routes messages between local and remote models, agents, and VMs.
+* **Storage Layer**: Manages keypairs, config, logs under `$XDG_CONFIG_HOME/hydravisor/`.
+
+### Non-Goals
+
+* Kubernetes-level scheduling
+* Multi-host networking overlay
+* Persistent container orchestrator replacement
 
 ---
 
@@ -46,7 +64,6 @@ Hydravisor is designed with AI containment, auditability, and user isolation as 
 | Agent attempts cross-instance communication | Packet rejected, error feedback sent to source        |
 | Valid token attaches to VM terminal session | tmux session established with role-limited privileges |
 | Log integrity test under model control      | Checksum mismatch triggers alert or lockdown          |
-
 
 ### 🔐 Runtime Policy File
 
@@ -313,39 +330,4 @@ Record terminal interaction sessions, preserving both user and model behavior. T
 
 ### Implementation Strategy
 
-* Use `tmux`'s `capture-pane` and `save-buffer` commands.
-* Trigger recordings automatically on instance launch or by user toggle.
-* Session metadata includes:
-
-  * Instance ID or name
-  * Timestamp (start/end)
-  * Associated model and user role
-  * Terminal log (plaintext or JSON structured)
-
-### Replay Options
-
-* Use `tmux` buffer restoration
-* Stream log into a playback shell view
-* Export as ANSI-correct `.cast` (e.g., for Asciinema compatibility)
-
-### Archive Format
-
-```text
-~/.hydravisor/logs/
-└── session-2025-05-29T20:15:42Z/
-    ├── meta.json
-    ├── terminal.log
-    └── dialog.jsonl
-```
-
-### Functional Tests
-
-| Scenario                          | Expectation                                   |
-| --------------------------------- | --------------------------------------------- |
-| VM with tmux recording enabled    | Log file exists after shutdown                |
-| Mid-session user-initiated save   | Buffer saved and available via CLI export     |
-| Model messages recorded correctly | Model dialog separated into structured format |
-
----
-
-*Document authored by Kelsea & Alethe – 2025*
+* Use `tmux`'s `capture-pane` and `save-buffer`
