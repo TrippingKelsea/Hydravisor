@@ -1,0 +1,37 @@
+# ssh.toml
+# Per-host SSH profile overrides for Hydravisor
+# Located at: $XDG_CONFIG_HOME/hydravisor/ssh.toml
+
+# === Example: Profile for a VM named "foo-vm" ===
+[hosts.foo-vm]
+# IP address or DNS name to connect to
+address = "192.168.122.12"
+
+# SSH port (defaults to 22 if omitted)
+port = 2222
+
+# Username to use for login
+username = "hydra"
+
+# Path to the private key for this VM's client access
+# Use relative pathing from $HOME or an absolute path
+identity_file = "$HOME/.hydravisor/keys/foo-client"
+
+# Enforce strict host key verification
+# Set to false for ephemeral or test environments
+host_key_check = true
+
+# Whether to enable SSH agent forwarding
+forward_agent = false
+
+# Optional connection timeout in seconds
+connect_timeout = 10
+
+# Optional idle session timeout in seconds
+session_timeout = 120
+
+# === Additional entries can be defined below ===
+# [hosts.bar-vm]
+# address = "10.0.0.42"
+# username = "hydra"
+# identity_file = "$HOME/.hydravisor/keys/bar-client"
