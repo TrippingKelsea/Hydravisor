@@ -51,19 +51,7 @@ Hydravisor is a terminal-based management interface for orchestrating isolated, 
 
 ## Quick Start
 
-```bash
-# Install Hydravisor
-curl -sSf https://install.hydravisor.dev | sh
-
-# Start the TUI
-hydravisor tui
-
-# Launch an agent sandbox
-hydravisor launch --template python-dev --name "coding-agent-1"
-
-# Connect an agent via MCP
-hydravisor mcp --port 3000 --auth-token <your-token>
-```
+> Coming Soon!
 
 ## Architecture Overview
 
