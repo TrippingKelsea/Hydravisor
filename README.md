@@ -198,12 +198,9 @@ session_timeout_minutes = 120
 
 ## Documentation
 
-- [📖 User Guide](docs/user-guide.md) - Complete usage documentation
-- [🏗️ Architecture](docs/architecture.md) - System design and components
-- [🔒 Security Model](docs/security.md) - Policies, isolation, and audit framework
-- [🤖 Agent Integration](docs/agent-integration.md) - MCP server and agent workflows
-- [⚙️ Configuration](docs/configuration.md) - Detailed configuration options
-- [🔧 Development](docs/development.md) - Building and contributing
+- [⚙️ Technical Design](TECHNICAL_DESIGN.md) - Overview of the design
+- [🏗️ Architecture](technical_design/architecture.md) - System design and components
+- [🔒 Security Model](technical_design/security.md) - Policies, isolation, and audit framework
 
 ## Contributing
 
