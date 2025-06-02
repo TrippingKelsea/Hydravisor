@@ -241,6 +241,6 @@ Hydravisor is licensed under the GNU General Public License v3.0 (GPL-3.0). See 
 
 ---
 
-**Built by [Kelsea Blackwell](https://yourlinkhere.dev)** - AI infrastructure engineer, open systems advocate, and builder of tools for safe AI development.
+**Built by [Kelsea Blackwell](https://www.kelsea.io)** - AI infrastructure engineer, open systems advocate, and builder of tools for safe AI development.
 
 *Join the discussion on [Discord](https://discord.gg/hydravisor) or contribute on [GitHub](https://github.com/TrippingKelsea/Hydravisor).*
