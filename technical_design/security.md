@@ -23,145 +23,44 @@ Hydravisor implements a defense-in-depth security model designed specifically fo
 
 ## Security Architecture
 
-### Multi-Layer Defense
-
-```mermaid
-flowchart TD
-    subgraph HostSystem["Host System"]
-        subgraph HydravisorCore["Hydravisor Core"]
-            PolicyEngine["Policy Engine"]
-            AuditEngine["Audit Engine"]
-            KeyManager["Key Manager"]
-        end
-
-        PolicyEngine --> VM1
-        AuditEngine --> VM2
-        KeyManager --> ContainerPool
-
-        subgraph IsolationLayer["Isolation Layer"]
-            subgraph VM1["VM 1"]
-                AgentA["Agent A"]
-            end
-            subgraph VM2["VM 2"]
-                AgentB["Agent B"]
-            end
-            subgraph ContainerPool["Container Pool"]
-                AgentC["Agent C"]
-            end
-        end
-    end
-```
-
-### Layer 1: Hardware/Hypervisor Isolation
-- **KVM Virtualization**: Full hardware-level isolation for VM-based environments
-- **Container Runtime Security**: User namespaces, cgroups, and seccomp for container isolation
-- **CPU/Memory Protection**: Hardware-enforced resource boundaries
-- **Network Isolation**: Separate network namespaces and virtual interfaces
-
-### Layer 2: Operating System Controls
-- **User Isolation**: Dedicated user accounts per environment with minimal privileges
-- **Filesystem Restrictions**: Chroot jails, bind mounts, and read-only filesystems
-- **Capability Dropping**: Minimal Linux capabilities assigned to agent processes
-- **Syscall Filtering**: Seccomp profiles to restrict dangerous system calls
-
-### Layer 3: Application-Level Security
-- **SSH Key Isolation**: Ephemeral keys per session with automatic rotation
-- **Process Monitoring**: Real-time tracking of all process executions
-- **Resource Quotas**: Strict limits on CPU, memory, disk, and network usage
-- **Command Filtering**: Blocked commands and restricted shell environments
-
-### Layer 4: Network Security
-- **Network Segmentation**: Isolated networks per environment or policy group
-- **Firewall Rules**: Default-deny with explicit allow rules per policy
-- **Traffic Monitoring**: Deep packet inspection and connection logging
-- **DNS Filtering**: Controlled DNS resolution with malicious domain blocking
-
-### Layer 5: Audit and Monitoring
-- **Comprehensive Logging**: All actions logged with tamper-proof storage
-- **Real-time Alerting**: Immediate notifications for policy violations
-- **Behavioral Analysis**: ML-based anomaly detection for unusual agent behavior
-- **Forensic Capabilities**: Complete audit trails for incident investigation
-
-## Policy Framework
-
-### Policy Types
-
-#### Resource Policies
-Control computational and storage resources allocated to environments.
-
-```yaml
-resource_policy:
-  name: "standard_limits"
-  description: "Standard resource limits for development environments"
-  limits:
-    cpu_cores: 2
-    cpu_percent: 80
-    memory_mb: 4096
-    disk_gb: 20
-    network_mbps: 10
-    process_count: 100
-    file_handles: 1000
-    session_duration_hours: 8
-  
-  quotas:
-    daily_cpu_hours: 16
-    daily_network_gb: 1
-    weekly_disk_writes_gb: 10
-```
-
-#### Access Control
-
-
-
-# Security Model
-
-## Overview
-
-Hydravisor implements a defense-in-depth security model designed specifically for AI agent sandbox environments. The security model assumes that AI agents are untrusted entities that require comprehensive monitoring, strict resource controls, and robust isolation mechanisms.
-
-## Threat Model
-
-### Primary Threats
-1. **Malicious Agent Behavior**: Agents attempting to escape sandbox, access unauthorized resources, or cause system damage
-2. **Agent Compromise**: Legitimate agents being compromised by external attackers
-3. **Resource Exhaustion**: Agents consuming excessive compute, memory, or network resources
-4. **Data Exfiltration**: Agents attempting to extract sensitive data from the host or other environments
-5. **Privilege Escalation**: Agents attempting to gain elevated privileges within or outside their sandbox
-6. **Lateral Movement**: Compromised agents attempting to access other agent environments
-
-### Trust Assumptions
-- **Hydravisor Core**: Fully trusted - runs with elevated privileges on host
-- **Host Infrastructure**: Trusted - assumed to be properly secured and maintained
-- **AI Agents**: Untrusted - all agent actions are potentially malicious
-- **Agent Environments**: Untrusted - environments may be compromised by agents
-- **Human Operators**: Partially trusted - can access administrative functions but actions are audited
-
 ## Security Architecture
 
 ### Multi-Layer Defense
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                          Host System                            │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                   Hydravisor Core                       │    │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │    │
-│  │  │   Policy    │  │    Audit    │  │     Key     │     │    │
-│  │  │   Engine    │  │   Engine    │  │  Manager    │     │    │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘     │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│           │                      │                      │        │
-│  ┌────────┼──────────────────────┼──────────────────────┼───┐    │
-│  │        ▼                      ▼                      ▼   │    │
-│  │  ┌──────────┐        ┌──────────┐        ┌──────────┐   │    │
-│  │  │   VM 1   │        │   VM 2   │        │ Container│   │    │
-│  │  │          │        │          │        │    Pool   │   │    │
-│  │  │ Agent A  │        │ Agent B  │        │ Agent C  │   │    │
-│  │  │          │        │          │        │          │   │    │
-│  │  └──────────┘        └──────────┘        └──────────┘   │    │
-│  │                    Isolation Layer                      │    │
-│  └─────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph "Host System"
+        subgraph "Hydravisor Core [Trusted]"
+            PE[Policy Engine]
+            AE[Audit Engine]
+            KM[Key Manager]
+        end
+        
+        subgraph "Isolation Layer"
+            VM1[VM 1<br/>Agent A]
+            VM2[VM 2<br/>Agent B]
+            CT1[Container<br/>Agent C]
+        end
+    end
+    
+    PE --> VM1
+    PE --> VM2
+    PE --> CT1
+    
+    AE --> VM1
+    AE --> VM2
+    AE --> CT1
+    
+    KM --> VM1
+    KM --> VM2
+    KM --> CT1
+    
+    style PE fill:#90EE90
+    style AE fill:#90EE90
+    style KM fill:#90EE90
+    style VM1 fill:#FFB6C1
+    style VM2 fill:#FFB6C1
+    style CT1 fill:#FFB6C1
 ```
 
 ### Layer 1: Hardware/Hypervisor Isolation
@@ -201,185 +100,163 @@ Hydravisor implements a defense-in-depth security model designed specifically fo
 #### Resource Policies
 Control computational and storage resources allocated to environments.
 
-```yaml
-resource_policy:
-  name: "standard_limits"
-  description: "Standard resource limits for development environments"
-  limits:
-    cpu_cores: 2
-    cpu_percent: 80
-    memory_mb: 4096
-    disk_gb: 20
-    network_mbps: 10
-    process_count: 100
-    file_handles: 1000
-    session_duration_hours: 8
-  
-  quotas:
-    daily_cpu_hours: 16
-    daily_network_gb: 1
-    weekly_disk_writes_gb: 10
+```toml
+[resource_policy]
+name = "standard_limits"
+description = "Standard resource limits for development environments"
+
+[resource_policy.limits]
+cpu_cores = 2
+cpu_percent = 80
+memory_mb = 4096
+disk_gb = 20
+network_mbps = 10
+process_count = 100
+file_handles = 1000
+session_duration_hours = 8
+
+[resource_policy.quotas]
+daily_cpu_hours = 16
+daily_network_gb = 1
+weekly_disk_writes_gb = 10
 ```
 
 #### Access Control Policies
 Define what resources and actions agents can access within their environments.
 
-```yaml
-access_policy:
-  name: "restricted_research"
-  description: "Locked-down environment for untrusted research agents"
-  
-  filesystem:
-    writable_paths:
-      - "/workspace"
-      - "/tmp"
-      - "/home/agent/.cache"
-    readonly_paths:
-      - "/usr"
-      - "/bin"
-      - "/lib"
-    blocked_paths:
-      - "/proc/*/mem"
-      - "/sys/kernel"
-      - "/dev/kmem"
-    
-  network:
-    allow_internet: false
-    allowed_domains:
-      - "pypi.org"
-      - "github.com"
-    blocked_ports:
-      - "22"  # SSH
-      - "3389"  # RDP
-    max_connections: 10
-    
-  processes:
-    allowed_commands:
-      - "/usr/bin/python3"
-      - "/usr/bin/git"
-      - "/usr/bin/pip"
-    blocked_commands:
-      - "/bin/bash"
-      - "/usr/bin/curl"
-      - "/usr/bin/wget"
-      - "/usr/bin/nc"
-    allow_shell: false
-    max_processes: 50
-    
-  privileges:
-    allow_sudo: false
-    allow_setuid: false
-    capabilities: []  # No special capabilities
+```toml
+[access_policy]
+name = "restricted_research"
+description = "Locked-down environment for untrusted research agents"
+
+[access_policy.filesystem]
+writable_paths = ["/workspace", "/tmp", "/home/agent/.cache"]
+readonly_paths = ["/usr", "/bin", "/lib"]
+blocked_paths = ["/proc/*/mem", "/sys/kernel", "/dev/kmem"]
+
+[access_policy.network]
+allow_internet = false
+allowed_domains = ["pypi.org", "github.com"]
+blocked_ports = [22, 3389]  # SSH, RDP
+max_connections = 10
+
+[access_policy.processes]
+allowed_commands = ["/usr/bin/python3", "/usr/bin/git", "/usr/bin/pip"]
+blocked_commands = ["/bin/bash", "/usr/bin/curl", "/usr/bin/wget", "/usr/bin/nc"]
+allow_shell = false
+max_processes = 50
+
+[access_policy.privileges]
+allow_sudo = false
+allow_setuid = false
+capabilities = []  # No special capabilities
 ```
 
 #### Behavioral Policies
 Monitor and restrict agent behavior patterns and activities.
 
-```yaml
-behavioral_policy:
-  name: "anomaly_detection"
-  description: "Detect and respond to suspicious agent behavior"
-  
-  monitoring:
-    file_access_rate:
-      max_per_minute: 1000
-      alert_threshold: 800
-    
-    network_activity:
-      max_requests_per_minute: 100
-      max_data_transfer_mb: 100
-      
-    process_spawning:
-      max_new_processes_per_minute: 20
-      monitor_process_tree: true
-      
-    system_calls:
-      monitor_dangerous_syscalls: true
-      blocked_syscalls:
-        - "ptrace"
-        - "mount" 
-        - "reboot"
-        
-  responses:
-    on_violation:
-      - action: "alert"
-        severity: "medium"
-      - action: "throttle"
-        duration_seconds: 60
-      - action: "log_detailed"
-        
-    on_repeated_violation:
-      - action: "suspend_session"
-        threshold: 3
-      - action: "alert"
-        severity: "high"
+```toml
+[behavioral_policy]
+name = "anomaly_detection"
+description = "Detect and respond to suspicious agent behavior"
+
+[behavioral_policy.monitoring.file_access_rate]
+max_per_minute = 1000
+alert_threshold = 800
+
+[behavioral_policy.monitoring.network_activity]
+max_requests_per_minute = 100
+max_data_transfer_mb = 100
+
+[behavioral_policy.monitoring.process_spawning]
+max_new_processes_per_minute = 20
+monitor_process_tree = true
+
+[behavioral_policy.monitoring.system_calls]
+monitor_dangerous_syscalls = true
+blocked_syscalls = ["ptrace", "mount", "reboot"]
+
+[[behavioral_policy.responses.on_violation]]
+action = "alert"
+severity = "medium"
+
+[[behavioral_policy.responses.on_violation]]
+action = "throttle"
+duration_seconds = 60
+
+[[behavioral_policy.responses.on_violation]]
+action = "log_detailed"
+
+[[behavioral_policy.responses.on_repeated_violation]]
+action = "suspend_session"
+threshold = 3
+
+[[behavioral_policy.responses.on_repeated_violation]]
+action = "alert"
+severity = "high"
 ```
 
 #### Audit Policies
 Configure what activities are logged and how audit data is managed.
 
-```yaml
-audit_policy:
-  name: "comprehensive_logging"
-  description: "Detailed logging for compliance and security"
-  
-  events:
-    file_operations:
-      log_reads: false
-      log_writes: true
-      log_deletes: true
-      log_permissions: true
-      
-    command_execution:
-      log_all: true
-      capture_output: true
-      capture_environment: true
-      
-    network_activity:
-      log_connections: true
-      log_dns_queries: true
-      capture_packet_headers: false
-      
-    authentication:
-      log_ssh_sessions: true
-      log_key_usage: true
-      log_failed_attempts: true
-      
-  retention:
-    default_retention_days: 90
-    high_risk_retention_days: 365
-    compress_after_days: 30
-    
-  export:
-    formats: ["json", "csv", "syslog"]
-    real_time_streaming: true
-    batch_export_interval_hours: 24
+```toml
+[audit_policy]
+name = "comprehensive_logging"
+description = "Detailed logging for compliance and security"
+
+[audit_policy.events.file_operations]
+log_reads = false
+log_writes = true
+log_deletes = true
+log_permissions = true
+
+[audit_policy.events.command_execution]
+log_all = true
+capture_output = true
+capture_environment = true
+
+[audit_policy.events.network_activity]
+log_connections = true
+log_dns_queries = true
+capture_packet_headers = false
+
+[audit_policy.events.authentication]
+log_ssh_sessions = true
+log_key_usage = true
+log_failed_attempts = true
+
+[audit_policy.retention]
+default_retention_days = 90
+high_risk_retention_days = 365
+compress_after_days = 30
+
+[audit_policy.export]
+formats = ["json", "csv", "syslog"]
+real_time_streaming = true
+batch_export_interval_hours = 24
 ```
 
 ### Policy Composition and Inheritance
 
 Policies can be combined and inherited to create complex security profiles:
 
-```yaml
-policy_template:
-  name: "ai_research_standard"
-  description: "Standard security profile for AI research environments"
-  
-  inherits:
-    - "base_security"
-    - "research_access"
-    
-  overrides:
-    resource_policy:
-      limits:
-        memory_mb: 8192  # Override base limit
-        
-  additional_policies:
-    - name: "gpu_access"
-      type: "resource"
-      rules:
-        gpu_memory_mb: 4096
-        gpu_compute_percent: 50
+```toml
+[policy_template]
+name = "ai_research_standard"
+description = "Standard security profile for AI research environments"
+inherits = ["base_security", "research_access"]
+
+[policy_template.overrides.resource_policy.limits]
+memory_mb = 8192  # Override base limit
+
+[[policy_template.additional_policies]]
+name = "gpu_access"
+type = "resource"
+
+[policy_template.additional_policies.rules]
+gpu_memory_mb = 4096
+gpu_compute_percent = 50
+```: 50
 ```
 
 ## Authentication and Authorization
@@ -435,22 +312,19 @@ pub enum Permission {
 
 ### SSH Key Lifecycle
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  Agent Request  │───▶│   Key Generate  │───▶│  Key Distribute │
-│                 │    │                 │    │                 │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         │              ┌─────────────────┐              │
-         │              │  Key Rotation   │              │
-         │              │   (Periodic)    │              │
-         │              └─────────────────┘              │
-         │                       │                       │
-         ▼              ┌─────────────────┐              ▼
-┌─────────────────┐    │  Key Revocation │    ┌─────────────────┐
-│ Session Cleanup │◀───│  (On Violation) │    │ Environment SSH │
-│                 │    │                 │    │     Daemon      │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+```mermaid
+flowchart LR
+    A["Agent Request"] --> B["Key Generate"] --> C["Key Distribute"]
+
+    A --> G["Session Cleanup"]
+    C --> I["Environment SSH<br/>Daemon"]
+
+    B --> D["Key Rotation<br/>(Periodic)"]
+    D --> C
+
+    D --> E["Key Revocation<br/>(On Violation)"]
+    E --> G
+
 ```
 
 ### Key Security Features

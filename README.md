@@ -1,502 +1,236 @@
-# Security Model
+# Hydravisor
 
-## Overview
+**Auditable AI Agent Sandbox Manager**
 
-Hydravisor implements a defense-in-depth security model designed specifically for AI agent sandbox environments. The security model assumes that AI agents are untrusted entities that require comprehensive monitoring, strict resource controls, and robust isolation mechanisms.
+Hydravisor is a terminal-based management interface for orchestrating isolated, auditable environments where AI agents can safely operate. Built for AI researchers, agent developers, and AI safety teams who need rapid provisioning, comprehensive monitoring, and secure containment of agent workloads.
 
-## Threat Model
 
-### Primary Threats
-1. **Malicious Agent Behavior**: Agents attempting to escape sandbox, access unauthorized resources, or cause system damage
-2. **Agent Compromise**: Legitimate agents being compromised by external attackers
-3. **Resource Exhaustion**: Agents consuming excessive compute, memory, or network resources
-4. **Data Exfiltration**: Agents attempting to extract sensitive data from the host or other environments
-5. **Privilege Escalation**: Agents attempting to gain elevated privileges within or outside their sandbox
-6. **Lateral Movement**: Compromised agents attempting to access other agent environments
 
-### Trust Assumptions
-- **Hydravisor Core**: Fully trusted - runs with elevated privileges on host
-- **Host Infrastructure**: Trusted - assumed to be properly secured and maintained
-- **AI Agents**: Untrusted - all agent actions are potentially malicious
-- **Agent Environments**: Untrusted - environments may be compromised by agents
-- **Human Operators**: Partially trusted - can access administrative functions but actions are audited
+## Core Vision
 
-## Security Architecture
+**Quick. Auditable. Secure.**
 
-## Security Architecture
+- **Rapid Provisioning**: Spin up isolated VMs or containers in seconds with agent-optimized templates
+- **Comprehensive Auditing**: Track every file change, command execution, and network activity
+- **Agent-Native Integration**: MCP server interface for seamless agent access and control
+- **Security-First**: Policy-based isolation with configurable trust boundaries
+- **Developer-Friendly**: Unified TUI for managing multiple agent workspaces
 
-### Multi-Layer Defense
+## Key Features
+
+### 🚀 **Rapid Environment Provisioning**
+- Pre-configured templates for common agent scenarios (coding, research, data analysis)
+- One-command VM/container deployment with SSH access
+- Automatic network isolation and resource constraints
+- Rollback and snapshot capabilities
+
+### 🔍 **Comprehensive Audit Trail**
+- Real-time file system monitoring with change tracking
+- Command execution logs with timestamps and context
+- Network activity monitoring and filtering
+- Session recordings via tmux integration
+- Exportable audit reports for compliance
+
+### 🤖 **Agent-First Design**
+- **MCP Server Integration**: Agents can request environments, SSH keys, and resource access
+- **Secure Agent Access**: Policy-controlled SSH key distribution and permissions
+- **Environment Introspection**: Agents can query environment state and constraints
+- **Session Management**: Isolated tmux sessions per agent workspace
+
+### 🛡️ **Security & Isolation**
+- **Policy-Based Controls**: Configurable security policies per environment type
+- **Network Segmentation**: Isolated networking with optional internet access
+- **Resource Limits**: CPU, memory, and storage quotas
+- **Privilege Escalation Controls**: Configurable sudo and capability restrictions
+
+### 🎯 **Multi-Modal AI Support**
+- **Local Models**: Ollama integration for privacy-focused AI workflows
+- **Remote Models**: Amazon Bedrock support for cloud-scale inference
+- **Hybrid Architectures**: Mix local and remote models within the same workflow
+- **Model Lifecycle Management**: Track which models accessed which environments
+
+## Quick Start
+
+```bash
+# Install Hydravisor
+curl -sSf https://install.hydravisor.dev | sh
+
+# Start the TUI
+hydravisor tui
+
+# Launch an agent sandbox
+hydravisor launch --template python-dev --name "coding-agent-1"
+
+# Connect an agent via MCP
+hydravisor mcp --port 3000 --auth-token <your-token>
+```
+
+## Architecture Overview
 
 ```mermaid
 graph TB
-    subgraph "Host System"
-        subgraph "Hydravisor Core [Trusted]"
-            PE[Policy Engine]
-            AE[Audit Engine]
-            KM[Key Manager]
-        end
-        
-        subgraph "Isolation Layer"
-            VM1[VM 1<br/>Agent A]
-            VM2[VM 2<br/>Agent B]
-            CT1[Container<br/>Agent C]
-        end
+    subgraph "AI Agents"
+        CB[Coding Bot]
+        RB[Research Bot]
+        SB[Safety Bot]
     end
     
-    PE --> VM1
-    PE --> VM2
-    PE --> CT1
+    subgraph "Hydravisor Core"
+        MCP[MCP Server]
+        SM[Session Manager]
+        AE[Audit Engine]
+        PE[Policy Engine]
+    end
     
-    AE --> VM1
-    AE --> VM2
-    AE --> CT1
+    subgraph "Environments"
+        VM1[Ubuntu VM]
+        CT1[Alpine Container]
+        VM2[Windows VM]
+    end
     
-    KM --> VM1
-    KM --> VM2
-    KM --> CT1
+    subgraph "Infrastructure"
+        LV[libvirt]
+        CD[containerd]
+        TM[tmux]
+        OL[Ollama]
+    end
     
-    style PE fill:#90EE90
-    style AE fill:#90EE90
-    style KM fill:#90EE90
-    style VM1 fill:#FFB6C1
-    style VM2 fill:#FFB6C1
-    style CT1 fill:#FFB6C1
+    CB --> MCP
+    RB --> MCP
+    SB --> MCP
+    
+    MCP --> SM
+    MCP --> PE
+    SM --> AE
+    
+    SM --> VM1
+    SM --> CT1
+    SM --> VM2
+    
+    SM --> LV
+    SM --> CD
+    AE --> TM
+    MCP --> OL
 ```
 
-### Layer 1: Hardware/Hypervisor Isolation
-- **KVM Virtualization**: Full hardware-level isolation for VM-based environments
-- **Container Runtime Security**: User namespaces, cgroups, and seccomp for container isolation
-- **CPU/Memory Protection**: Hardware-enforced resource boundaries
-- **Network Isolation**: Separate network namespaces and virtual interfaces
+## Use Cases
 
-### Layer 2: Operating System Controls
-- **User Isolation**: Dedicated user accounts per environment with minimal privileges
-- **Filesystem Restrictions**: Chroot jails, bind mounts, and read-only filesystems
-- **Capability Dropping**: Minimal Linux capabilities assigned to agent processes
-- **Syscall Filtering**: Seccomp profiles to restrict dangerous system calls
-
-### Layer 3: Application-Level Security
-- **SSH Key Isolation**: Ephemeral keys per session with automatic rotation
-- **Process Monitoring**: Real-time tracking of all process executions
-- **Resource Quotas**: Strict limits on CPU, memory, disk, and network usage
-- **Command Filtering**: Blocked commands and restricted shell environments
-
-### Layer 4: Network Security
-- **Network Segmentation**: Isolated networks per environment or policy group
-- **Firewall Rules**: Default-deny with explicit allow rules per policy
-- **Traffic Monitoring**: Deep packet inspection and connection logging
-- **DNS Filtering**: Controlled DNS resolution with malicious domain blocking
-
-### Layer 5: Audit and Monitoring
-- **Comprehensive Logging**: All actions logged with tamper-proof storage
-- **Real-time Alerting**: Immediate notifications for policy violations
-- **Behavioral Analysis**: ML-based anomaly detection for unusual agent behavior
-- **Forensic Capabilities**: Complete audit trails for incident investigation
-
-## Policy Framework
-
-### Policy Types
-
-#### Resource Policies
-Control computational and storage resources allocated to environments.
-
-```toml
-[resource_policy]
-name = "standard_limits"
-description = "Standard resource limits for development environments"
-
-[resource_policy.limits]
-cpu_cores = 2
-cpu_percent = 80
-memory_mb = 4096
-disk_gb = 20
-network_mbps = 10
-process_count = 100
-file_handles = 1000
-session_duration_hours = 8
-
-[resource_policy.quotas]
-daily_cpu_hours = 16
-daily_network_gb = 1
-weekly_disk_writes_gb = 10
+### 🧪 **AI Agent Development & Testing**
+```bash
+# Test a coding agent safely
+hydravisor launch --template nodejs-sandbox --policy restricted
+hydravisor attach --agent coding-bot-v2
+# Agent modifies files, runs tests
+hydravisor audit --session coding-bot-v2 --export report.json
 ```
 
-#### Access Control Policies
-Define what resources and actions agents can access within their environments.
+### 🔬 **AI Safety Research**
+```bash
+# Isolated environment for potentially risky agent behavior
+hydravisor launch --template research-env --network-isolated
+hydravisor monitor --real-time --alert-on suspicious-activity
+```
+
+### 🏢 **Team Collaboration**
+```bash
+# Shared environments for agent development teams
+hydravisor launch --template shared-dev --users team-alpha
+hydravisor share --session shared-dev --read-only analyst-team
+```
+
+### 📊 **Compliance & Auditing**
+```bash
+# Generate compliance reports
+hydravisor audit --all-sessions --timerange 30d --format csv
+hydravisor export --audit-trail --redact-sensitive
+```
+
+## Technology Stack
+
+- **Frontend**: Rust + [ratatui](https://ratatui.rs) (terminal user interface)
+- **Virtualization**: libvirt (KVM integration) + containerd (container runtime)
+- **Session Management**: tmux (persistent sessions and logging)
+- **Local AI**: [Ollama](https://ollama.com) (local model serving)
+- **Remote AI**: [Amazon Bedrock](https://aws.amazon.com/bedrock) SDK
+- **Agent Integration**: [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server
+
+## Installation
+
+### Prerequisites
+- Linux host with KVM support
+- libvirt and containerd installed
+- tmux and SSH server
+- Rust 1.70+ (for building from source)
+
+### From Source
+```bash
+git clone https://github.com/TrippingKelsea/Hydravisor
+cd Hydravisor
+cargo build --release
+sudo cp target/release/hydravisor /usr/local/bin/
+```
+
+
+## Configuration
+
+Hydravisor uses a layered configuration system:
 
 ```toml
-[access_policy]
-name = "restricted_research"
-description = "Locked-down environment for untrusted research agents"
+# ~/.config/hydravisor/config.toml
+[server]
+mcp_port = 3000
+audit_retention_days = 90
 
-[access_policy.filesystem]
-writable_paths = ["/workspace", "/tmp", "/home/agent/.cache"]
-readonly_paths = ["/usr", "/bin", "/lib"]
-blocked_paths = ["/proc/*/mem", "/sys/kernel", "/dev/kmem"]
-
-[access_policy.network]
+[security]
+default_policy = "restricted"
 allow_internet = false
-allowed_domains = ["pypi.org", "github.com"]
-blocked_ports = [22, 3389]  # SSH, RDP
-max_connections = 10
+max_cpu_cores = 4
+max_memory_gb = 8
 
-[access_policy.processes]
-allowed_commands = ["/usr/bin/python3", "/usr/bin/git", "/usr/bin/pip"]
-blocked_commands = ["/bin/bash", "/usr/bin/curl", "/usr/bin/wget", "/usr/bin/nc"]
-allow_shell = false
-max_processes = 50
+[environments]
+templates_dir = "~/.config/hydravisor/templates"
+default_os = "ubuntu:22.04"
 
-[access_policy.privileges]
-allow_sudo = false
-allow_setuid = false
-capabilities = []  # No special capabilities
+[agents]
+ssh_key_rotation_hours = 24
+session_timeout_minutes = 120
 ```
 
-#### Behavioral Policies
-Monitor and restrict agent behavior patterns and activities.
+## Documentation
 
-```toml
-[behavioral_policy]
-name = "anomaly_detection"
-description = "Detect and respond to suspicious agent behavior"
+- [📖 User Guide](docs/user-guide.md) - Complete usage documentation
+- [🏗️ Architecture](docs/architecture.md) - System design and components
+- [🔒 Security Model](docs/security.md) - Policies, isolation, and audit framework
+- [🤖 Agent Integration](docs/agent-integration.md) - MCP server and agent workflows
+- [⚙️ Configuration](docs/configuration.md) - Detailed configuration options
+- [🔧 Development](docs/development.md) - Building and contributing
 
-[behavioral_policy.monitoring.file_access_rate]
-max_per_minute = 1000
-alert_threshold = 800
+## Contributing
 
-[behavioral_policy.monitoring.network_activity]
-max_requests_per_minute = 100
-max_data_transfer_mb = 100
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-[behavioral_policy.monitoring.process_spawning]
-max_new_processes_per_minute = 20
-monitor_process_tree = true
-
-[behavioral_policy.monitoring.system_calls]
-monitor_dangerous_syscalls = true
-blocked_syscalls = ["ptrace", "mount", "reboot"]
-
-[[behavioral_policy.responses.on_violation]]
-action = "alert"
-severity = "medium"
-
-[[behavioral_policy.responses.on_violation]]
-action = "throttle"
-duration_seconds = 60
-
-[[behavioral_policy.responses.on_violation]]
-action = "log_detailed"
-
-[[behavioral_policy.responses.on_repeated_violation]]
-action = "suspend_session"
-threshold = 3
-
-[[behavioral_policy.responses.on_repeated_violation]]
-action = "alert"
-severity = "high"
+### Development Setup
+```bash
+git clone https://github.com/TrippingKelsea/Hydravisor
+cd Hydravisor
+cargo install cargo-watch
+cargo watch -x "run -- --dev"
 ```
 
-#### Audit Policies
-Configure what activities are logged and how audit data is managed.
+## License
 
-```toml
-[audit_policy]
-name = "comprehensive_logging"
-description = "Detailed logging for compliance and security"
+Hydravisor is licensed under the GNU General Public License v3.0 (GPL-3.0). See [LICENSE](LICENSE) for more information.
 
-[audit_policy.events.file_operations]
-log_reads = false
-log_writes = true
-log_deletes = true
-log_permissions = true
+## Roadmap
 
-[audit_policy.events.command_execution]
-log_all = true
-capture_output = true
-capture_environment = true
+- [x] **Phase 1**: Core TUI and basic VM/container management
+- [ ] **Phase 2**: MCP server integration and agent access controls
+- [ ] **Phase 3**: Advanced audit engine and policy framework
+- [ ] **Phase 4**: Multi-node deployment and cluster management
+- [ ] **Phase 5**: Plugin ecosystem and community templates
 
-[audit_policy.events.network_activity]
-log_connections = true
-log_dns_queries = true
-capture_packet_headers = false
+---
 
-[audit_policy.events.authentication]
-log_ssh_sessions = true
-log_key_usage = true
-log_failed_attempts = true
+**Built by [Kelsea Blackwell](https://www.kelsea.io)** - AI infrastructure engineer, open systems advocate, and builder of tools for safe AI development.
 
-[audit_policy.retention]
-default_retention_days = 90
-high_risk_retention_days = 365
-compress_after_days = 30
-
-[audit_policy.export]
-formats = ["json", "csv", "syslog"]
-real_time_streaming = true
-batch_export_interval_hours = 24
-```
-
-### Policy Composition and Inheritance
-
-Policies can be combined and inherited to create complex security profiles:
-
-```toml
-[policy_template]
-name = "ai_research_standard"
-description = "Standard security profile for AI research environments"
-inherits = ["base_security", "research_access"]
-
-[policy_template.overrides.resource_policy.limits]
-memory_mb = 8192  # Override base limit
-
-[[policy_template.additional_policies]]
-name = "gpu_access"
-type = "resource"
-
-[policy_template.additional_policies.rules]
-gpu_memory_mb = 4096
-gpu_compute_percent = 50
-```: 50
-```
-
-## Authentication and Authorization
-
-### Agent Authentication
-- **MCP Token-Based Auth**: Agents authenticate using Bearer tokens with configurable expiration
-- **SSH Key Authentication**: Ephemeral SSH keys generated per session
-- **Mutual TLS**: Optional client certificate authentication for high-security environments
-- **API Rate Limiting**: Configurable rate limits per agent or token
-
-### Human Authentication
-- **Local User Accounts**: Integration with system users and groups
-- **External Identity Providers**: LDAP, Active Directory, OAuth2/OIDC support
-- **Multi-Factor Authentication**: TOTP, hardware tokens, biometric authentication
-- **Role-Based Access Control**: Configurable roles with granular permissions
-
-### Authorization Model
-
-```rust
-// Role definitions
-pub enum Role {
-    Administrator,     // Full system access
-    Operator,         // Environment management, limited policy changes
-    Auditor,          // Read-only access to logs and reports
-    Developer,        // Create/manage own environments
-    Observer,         // View-only access to dashboards
-}
-
-// Permission granularity
-pub enum Permission {
-    // Environment management
-    CreateEnvironment(EnvironmentType),
-    DestroyEnvironment(SessionId),
-    AttachToEnvironment(SessionId),
-    
-    // Policy management  
-    CreatePolicy(PolicyType),
-    ModifyPolicy(PolicyId),
-    AssignPolicy(SessionId, PolicyId),
-    
-    // Audit access
-    ViewAuditLogs(SessionId),
-    ExportAuditData(DateRange),
-    
-    // System administration
-    ModifySystemConfig,
-    ManageUsers,
-    ViewSystemMetrics,
-}
-```
-
-## Key Management
-
-### SSH Key Lifecycle
-
-```mermaid
-flowchart LR
-    A["Agent Request"] --> B["Key Generate"] --> C["Key Distribute"]
-
-    A --> G["Session Cleanup"]
-    C --> I["Environment SSH<br/>Daemon"]
-
-    B --> D["Key Rotation<br/>(Periodic)"]
-    D --> C
-
-    D --> E["Key Revocation<br/>(On Violation)"]
-    E --> G
-
-```
-
-### Key Security Features
-- **Ephemeral Keys**: New key pair generated for each session
-- **Automatic Rotation**: Keys rotated on configurable schedule (default: 24 hours)
-- **Immediate Revocation**: Keys can be instantly revoked on policy violations
-- **Audit Trail**: All key operations logged with session correlation
-- **Secure Storage**: Private keys encrypted at rest using host key management
-
-### Key Distribution Protocol
-
-```rust
-#[derive(Serialize, Deserialize)]
-pub struct KeyRequest {
-    pub session_id: SessionId,
-    pub agent_id: AgentId,
-    pub requested_access: AccessLevel,
-    pub duration_hours: Option<u32>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct KeyResponse {
-    pub ssh_private_key: String,
-    pub ssh_endpoint: SocketAddr,
-    pub username: String,
-    pub expires_at: DateTime<Utc>,
-    pub restrictions: Vec<SSHRestriction>,
-}
-
-pub enum SSHRestriction {
-    CommandPattern(String),        // Only allow matching commands
-    SourceIP(IpAddr),             // Restrict source IP
-    PortForwarding(bool),         // Allow/deny port forwarding
-    AgentForwarding(bool),        // Allow/deny SSH agent forwarding
-    TTL(Duration),                // Maximum session duration
-}
-```
-
-## Audit and Monitoring
-
-### Audit Event Categories
-
-#### System Events
-- Environment creation, modification, destruction
-- Policy changes and assignments
-- User authentication and authorization
-- System configuration changes
-
-#### Agent Activity Events  
-- SSH session establishment and termination
-- Command executions with full command line and output
-- File system operations (create, modify, delete, move)
-- Network connections and data transfers
-- Process creation and termination
-
-#### Security Events
-- Policy violations and enforcement actions
-- Authentication failures and suspicious access patterns
-- Resource limit violations
-- Anomalous behavior detection alerts
-- Key generation, rotation, and revocation
-
-### Real-Time Monitoring
-
-```yaml
-monitoring_config:
-  real_time_alerts:
-    - name: "policy_violation"
-      condition: "event.type == 'PolicyViolation'"
-      severity: "high"
-      actions:
-        - "notify_admin"
-        - "pause_session"
-        
-    - name: "resource_exhaustion"
-      condition: "event.cpu_percent > 95 OR event.memory_percent > 95"
-      severity: "medium"
-      actions:
-        - "throttle_resources"
-        - "alert_operator"
-        
-    - name: "privilege_escalation_attempt"
-      condition: "event.type == 'CommandExecute' AND event.command CONTAINS 'sudo'"
-      severity: "critical"
-      actions:
-        - "terminate_session"
-        - "alert_security_team"
-        
-  dashboards:
-    - name: "security_overview"
-      refresh_seconds: 5
-      panels:
-        - "active_threats"
-        - "policy_violations_24h"
-        - "resource_utilization"
-        - "agent_activity_heatmap"
-```
-
-### Forensic Capabilities
-
-#### Session Reconstruction
-- Complete tmux session recordings with playback capability
-- Command history with timestamps and exit codes
-- File system state snapshots at configurable intervals
-- Network packet captures for suspicious activities
-
-#### Incident Response
-- Automatic environment isolation on security events
-- Evidence collection and preservation
-- Chain of custody tracking for audit data
-- Integration with external SIEM systems
-
-## Compliance and Standards
-
-### Framework Alignment
-- **NIST Cybersecurity Framework**: Risk management and security controls
-- **ISO 27001**: Information security management systems
-- **SOC 2 Type II**: Security, availability, and confidentiality controls
-- **GDPR**: Data protection and privacy requirements
-
-### Audit Requirements
-- **Immutable Logging**: Tamper-evident audit trails using cryptographic hashing
-- **Data Retention**: Configurable retention periods with automated cleanup
-- **Access Controls**: Role-based access to audit data with approval workflows
-- **Export Capabilities**: Multiple formats for compliance reporting
-
-### Compliance Reporting
-
-```rust
-pub struct ComplianceReport {
-    pub report_id: String,
-    pub report_type: ComplianceStandard,
-    pub period: DateRange,
-    pub generated_at: DateTime<Utc>,
-    pub summary: ComplianceSummary,
-    pub findings: Vec<ComplianceFinding>,
-    pub evidence: Vec<EvidenceReference>,
-}
-
-pub enum ComplianceStandard {
-    SOC2,
-    ISO27001,
-    NIST,
-    GDPR,
-    Custom(String),
-}
-
-pub struct ComplianceFinding {
-    pub control_id: String,
-    pub status: ComplianceStatus,
-    pub description: String,
-    pub evidence_count: u32,
-    pub risk_level: RiskLevel,
-    pub remediation_required: bool,
-}
-```
-
-## Incident Response
-
-### Automated Response Actions
-- **Session Termination**: Immediate shutdown of compromised environments
-- **Network Isolation**: Quarantine suspicious environments
-- **Resource Throttling**: Limit resources for misbehaving agents
-- **Alert Escalation**: Automated notification chains based on severity
-- **Evidence Preservation**: Automatic snapshot and log collection
-
-### Manual Response Procedures
-1. **Threat Assessment**: Evaluate scope and severity of security event
-2. **Containment**: Isolate affected environments and limit damage
-3. **Evidence Collection**: Preserve logs, snapshots, and forensic data
-4. **Analysis**: Investigate root cause and attack vectors
-5. **Recovery**: Restore normal operations with security improvements
-6. **Lessons Learned**: Update policies and procedures based on findings
-
-This security model provides comprehensive protection for AI agent sandbox environments while maintaining the flexibility needed for diverse research and development use cases.
+*Join the discussion on [Discord](https://discord.gg/hydravisor) or contribute on [GitHub](https://github.com/TrippingKelsea/Hydravisor).*
