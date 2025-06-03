@@ -116,7 +116,7 @@ impl SessionManager {
         // 6. Return `CreateSessionResponse`.
 
         println!("Creating session for request: {:?}", request);
-        let session_id = format!("sess_{}", uuid::Uuid::new_v4().to_simple());
+        let session_id = format!("sess_{}", uuid::Uuid::new_v4().simple());
         // Placeholder - this needs full EnvConfig derivation logic
         let env_conf = request.custom_env_config.clone().ok_or_else(|| HydraError::SessionManagerError("Custom env config required for now".to_string()))?;
 
