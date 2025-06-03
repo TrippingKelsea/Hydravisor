@@ -7,11 +7,16 @@
 
 ## 📖 Index of Sub-Designs
 
-* [`tui.design.md`](./technical_design/tui.design.md) – Terminal UI architecture
-* [`policy.toml.md`](./technical_design/policy.toml.md) – Trust enforcement model
-* [`mcp.design.md`](./technical_design/mcp.design.md) – Model Context Protocol specification
-* [`ssh.design.md`](./technical_design/ssh.design.md) – Key management and SSH trust
+* ['agent-flow.design.md](./technical_design/agent-flow.design.md) – Agent Interaction Workflow
+* ['Architecture Overview'](./technical_design/architecture-overview.md) – High Level Architecture Overview
 * [`cli.design.md`](./technical_design/cli.design.md) – CLI interface and usage specification
+* ['interface.design.md'](./technical_design/interface.design.md) –
+* ['logging_audit.md'](./technical_design/logging_audit.md) –
+* [`mcp.design.md`](./technical_design/mcp.design.md) – Model Context Protocol specification
+* [`policy.toml.md`](./technical_design/policy.toml.md) – Trust enforcement model
+* ['securiy.md'](./technical_design/security.md) –
+* [`ssh.design.md`](./technical_design/ssh.design.md) – Key management and SSH trust
+* [`tui.design.md`](./technical_design/tui.design.md) – Terminal UI architecture
 
 ---
 

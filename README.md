@@ -39,9 +39,9 @@ Hydravisor is a terminal-based management interface for orchestrating isolated, 
 
 ### 🛡️ **Security & Isolation**
 - **Policy-Based Controls**: Configurable security policies per environment type
-- **Network Segmentation**: Isolated networking with optional internet access
-- **Resource Limits**: CPU, memory, and storage quotas
-- **Privilege Escalation Controls**: Configurable sudo and capability restrictions
+- **Network Segmentation**: Quickly enable/disable network access for a VM/Container
+- **Privilege Escalation Controls**: Agents can only access the instancess you grant access
+- **SSH Key Lifecycle Management**: Don't let your agents reuse keypairs!
 
 ### 🎯 **Multi-Modal AI Support**
 - **Local Models**: Ollama integration for privacy-focused AI workflows
