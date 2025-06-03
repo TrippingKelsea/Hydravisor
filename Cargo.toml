@@ -1,6 +1,27 @@
 [package]
 name = "hydravisor"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+clap = { version = "4.4", features = ["derive"] }
+ratatui = { version = "0.26.1", features = ["all-widgets"] } # Keep an eye on version, 0.26.1 is latest for now
+crossterm = "0.27"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+xdg = "2.5"
+anyhow = "1.0" # For easy error handling in main/CLI
+
+# Placeholder for potential future dependencies from design docs
+# libvirt-rs = { version = "0.7", optional = true } # For KVM
+# containerd-client = { version = "0.8", optional = true } # For containerd
+# tmux_interface = { version = "0.3", optional = true } # For tmux
+# ollama-rs = { version = "0.1.6", optional = true } # For Ollama
+# aws-sdk-bedrockruntime = { version = "1.0", optional = true } # For Bedrock
