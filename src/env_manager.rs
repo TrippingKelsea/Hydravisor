@@ -9,6 +9,13 @@ use std::path::PathBuf;
 use crate::config::Config;
 // use crate::errors::HydraError; // Not used yet, keep for later if specific errors are needed
 
+#[cfg(feature = "libvirt_integration")]
+use virt::connect::Connect;
+#[cfg(feature = "libvirt_integration")]
+use virt::domain::{Domain, DomainInfo};
+#[cfg(feature = "libvirt_integration")]
+use virt::sys; // Import the sys module for C constants
+
 // Represents the type of environment
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum EnvironmentType {
@@ -68,21 +75,41 @@ pub struct EnvironmentStatus {
 
 pub struct EnvironmentManager {
     // config: EnvManagerConfig, // Derived from main Config
+    #[cfg(feature = "libvirt_integration")]
+    libvirt_conn: Option<Connect>,
     // active_environments: Mutex<HashMap<String, EnvironmentStatus>>,
-    // libvirt_conn: Option<LibvirtConnection>, // If libvirt feature enabled
     // containerd_client: Option<ContainerdClient>, // If containerd feature enabled
 }
 
 impl EnvironmentManager {
     pub fn new(app_config: &Config) -> Result<Self> {
-        // Minimal implementation to avoid panic.
-        // Actual initialization (libvirt/containerd connections) will be done later.
+        #[cfg(feature = "libvirt_integration")]
+        let libvirt_conn = match Connect::open(Some("qemu:///system")) {
+            Ok(conn) => {
+                println!("Successfully connected to libvirt daemon (qemu:///system).");
+                Some(conn)
+            }
+            Err(e) => {
+                eprintln!(
+                    "Failed to connect to libvirt (qemu:///system): {}. Live VM data will not be available.",
+                    e
+                );
+                None
+            }
+        };
+        #[cfg(not(feature = "libvirt_integration"))]
+        let libvirt_conn: Option<Connect> = None; // Ensure libvirt_conn is defined even if feature is off
+
+
         println!(
-            "EnvironmentManager initialized (placeholder). VM Provider support: TODO, Container Provider support: TODO. Config: {:?}",
+            "EnvironmentManager initialized. VM Provider support: {}. Container Provider support: TODO. Config: {:?}",
+            if cfg!(feature = "libvirt_integration") { "libvirt" } else { "None" },
             app_config.providers
         );
+
         Ok(EnvironmentManager {
-            // Initialize fields here if any are added to the struct
+            #[cfg(feature = "libvirt_integration")]
+            libvirt_conn,
         })
     }
 
@@ -167,12 +194,97 @@ impl EnvironmentManager {
     
     // TODO: Add other lifecycle methods like stop, start, restart as needed.
 
-    // Placeholder method to simulate listing VMs from libvirt
-    pub fn list_vms_placeholder(&self) -> Result<Vec<EnvironmentStatus>> {
+    pub fn list_vms(&self) -> Result<Vec<EnvironmentStatus>> {
+        #[cfg(feature = "libvirt_integration")]
+        {
+            if let Some(conn) = &self.libvirt_conn {
+                // Attempt to fetch live data
+                let mut vms = Vec::new();
+                let mut domain_names = Vec::new();
+                if let Ok(active_domain_ids) = conn.list_domains() {
+                    for id in active_domain_ids {
+                        if let Ok(domain) = Domain::lookup_by_id(&conn, id) {
+                            if let Ok(name) = domain.get_name() {
+                                domain_names.push(name);
+                            }
+                        }
+                    }
+                }
+                if let Ok(defined_domain_names) = conn.list_defined_domains() {
+                     domain_names.extend(defined_domain_names);
+                }
+                domain_names.sort_unstable();
+                domain_names.dedup();
+
+                for name in domain_names {
+                    if let Ok(domain) = Domain::lookup_by_name(&conn, &name) {
+                        let state_info: DomainInfo = domain.get_info()?;
+                        let hydra_state = match state_info.state as u32 {
+                            sys::VIR_DOMAIN_NOSTATE => EnvironmentState::Unknown,
+                            sys::VIR_DOMAIN_RUNNING => EnvironmentState::Running,
+                            sys::VIR_DOMAIN_BLOCKED => EnvironmentState::Suspended,
+                            sys::VIR_DOMAIN_PAUSED => EnvironmentState::Suspended,
+                            sys::VIR_DOMAIN_SHUTDOWN => EnvironmentState::Terminated,
+                            sys::VIR_DOMAIN_SHUTOFF => EnvironmentState::Stopped,
+                            sys::VIR_DOMAIN_CRASHED => EnvironmentState::Error("Crashed".to_string()),
+                            sys::VIR_DOMAIN_PMSUSPENDED => EnvironmentState::Suspended,
+                            other_state => {
+                                eprintln!("Unknown libvirt domain state encountered: {}", other_state);
+                                EnvironmentState::Unknown
+                            }
+                        };
+                        let status = EnvironmentStatus {
+                            instance_id: domain.get_uuid_string().unwrap_or_else(|_| "N/A-UUID".to_string()),
+                            name: name.clone(),
+                            env_type: EnvironmentType::Vm,
+                            state: hydra_state,
+                            memory_max_kb: Some(state_info.max_mem as u64),
+                            memory_used_kb: Some(state_info.memory as u64),
+                            cpu_cores_used: Some(state_info.nr_virt_cpu as u32),
+                            ..Default::default()
+                        };
+                        vms.push(status);
+                    }
+                }
+                println!("Successfully fetched {} VMs from libvirt.", vms.len());
+                return Ok(vms); // Return live data
+            } else {
+                // Libvirt connection failed or was None initially
+                eprintln!("Libvirt connection not available for fetching VMs.");
+                #[cfg(feature = "dummy_env_data")]
+                {
+                    println!("Falling back to dummy VM data because 'dummy_env_data' feature is enabled.");
+                    return self.list_vms_placeholder();
+                }
+                #[cfg(not(feature = "dummy_env_data"))]
+                {
+                    println!("Returning empty VM list because 'dummy_env_data' feature is not enabled.");
+                    return Ok(Vec::new()); // Return empty list if dummy data is not enabled
+                }
+            }
+        }
+        
+        #[cfg(not(feature = "libvirt_integration"))]
+        {
+            println!("Libvirt integration feature not enabled.");
+            #[cfg(feature = "dummy_env_data")]
+            {
+                println!("Falling back to dummy VM data because 'dummy_env_data' feature is enabled.");
+                return self.list_vms_placeholder();
+            }
+            #[cfg(not(feature = "dummy_env_data"))]
+            {
+                println!("Returning empty VM list because 'dummy_env_data' feature is not enabled and libvirt is off.");
+                return Ok(Vec::new());
+            }
+        }
+    }
+    
+    fn list_vms_placeholder(&self) -> Result<Vec<EnvironmentStatus>> {
         Ok(vec![
             EnvironmentStatus {
-                instance_id: "vm-uuid-001".to_string(),
-                name: "dev-vm-arch".to_string(),
+                instance_id: "vm-uuid-placeholder-001".to_string(),
+                name: "dev-vm-arch-placeholder".to_string(),
                 env_type: EnvironmentType::Vm,
                 state: EnvironmentState::Running,
                 ip_address: Some("192.168.122.101".to_string()),
@@ -182,22 +294,12 @@ impl EnvironmentManager {
                 ..Default::default()
             },
             EnvironmentStatus {
-                instance_id: "vm-uuid-002".to_string(),
-                name: "test-vm-ubuntu".to_string(),
+                instance_id: "vm-uuid-placeholder-002".to_string(),
+                name: "test-vm-ubuntu-placeholder".to_string(),
                 env_type: EnvironmentType::Vm,
                 state: EnvironmentState::Stopped,
                 memory_max_kb: Some(2 * 1024 * 1024), // 2GB
                 cpu_cores_used: Some(1),
-                ..Default::default()
-            },
-            EnvironmentStatus {
-                instance_id: "vm-uuid-003".to_string(),
-                name: "build-server-debian".to_string(),
-                env_type: EnvironmentType::Vm,
-                state: EnvironmentState::Suspended,
-                ip_address: Some("192.168.122.103".to_string()),
-                memory_max_kb: Some(8 * 1024 * 1024), // 8GB
-                cpu_cores_used: Some(4),
                 ..Default::default()
             },
         ])

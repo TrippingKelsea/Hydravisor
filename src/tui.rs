@@ -87,7 +87,8 @@ impl App {
     }
 
     fn fetch_vms(&mut self) {
-        match self.env_manager.list_vms_placeholder() {
+        // Now calls the new list_vms() method which handles libvirt integration or placeholder
+        match self.env_manager.list_vms() { 
             Ok(vms) => self.vms = vms,
             Err(e) => {
                 // Log error or set a TUI status message
