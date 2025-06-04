@@ -14,6 +14,8 @@ pub struct ChatWidget;
 impl ChatWidget {
     // app needs to be mutable for chat_list_state
     pub fn render(f: &mut Frame, app: &mut App, area: Rect) { 
+        let theme = &app.theme;
+
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -23,29 +25,35 @@ impl ChatWidget {
             .split(area);
 
         // Left Pane: Chat Info
-        let left_pane_block = Block::default().title("Chat Info").borders(Borders::ALL);
+        let left_pane_block = Block::default()
+            .title(Line::from(Span::styled("Chat Info", Style::default().fg(theme.primary_foreground))))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.border_primary));
         let left_pane_content_area = left_pane_block.inner(chunks[0]);
         f.render_widget(left_pane_block, chunks[0]);
 
-        let chat_info_text = if let Some(chat_session) = &app.active_chat {
-            format!(
-                "Model: {}\nMessages: {}\nStreaming: {}",
-                chat_session.model_name,
-                chat_session.messages.len(),
-                if chat_session.is_streaming { "Yes" } else { "No" }
-            )
+        let chat_info_display_text = if let Some(chat_session) = &app.active_chat {
+            let info_lines = vec![
+                Line::from(vec![Span::styled("Model: ", Style::default().fg(theme.secondary_foreground)), Span::styled(&chat_session.model_name, Style::default().fg(theme.chat_info_text).bold())]),
+                Line::from(vec![Span::styled("Messages: ", Style::default().fg(theme.secondary_foreground)), Span::styled(chat_session.messages.len().to_string(), Style::default().fg(theme.chat_info_text))]),
+                Line::from(vec![Span::styled("Streaming: ", Style::default().fg(theme.secondary_foreground)), Span::styled(if chat_session.is_streaming { "Yes" } else { "No" }, Style::default().fg(theme.chat_info_text))]),
+            ];
+            Text::from(info_lines)
         } else {
-            "No active chat. Select model from Ollama list and press <Enter>.".to_string()
+            Text::from(Line::from(Span::styled("No active chat. Select model and press <Enter>.", Style::default().fg(theme.secondary_foreground))))
         };
-        f.render_widget(Paragraph::new(Text::from(chat_info_text)).wrap(ratatui::widgets::Wrap { trim: true }), left_pane_content_area);
+        f.render_widget(Paragraph::new(chat_info_display_text).wrap(ratatui::widgets::Wrap { trim: true }), left_pane_content_area);
 
         // Right Pane: Chat Messages
-        let right_pane_title = if let Some(chat) = &app.active_chat {
+        let right_pane_title_str = if let Some(chat) = &app.active_chat {
             format!("Chat with {} ({})", chat.model_name, if chat.is_streaming {"streaming..."} else {"idle"})
         } else {
             "Chat Area".to_string()
         };
-        let right_pane_block = Block::default().title(Line::from(right_pane_title)).borders(Borders::ALL);
+        let right_pane_block = Block::default()
+            .title(Line::from(Span::styled(right_pane_title_str, theme.chat_title)))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.border_secondary));
         let messages_area = right_pane_block.inner(chunks[1]);
         f.render_widget(right_pane_block, chunks[1]);
 
@@ -54,9 +62,9 @@ impl ChatWidget {
         if let Some(chat_session) = &mut app.active_chat {
             let message_items: Vec<ListItem> = chat_session.messages.iter().enumerate().map(|(idx, msg)| {
                 let sender_style = if msg.sender == "user" {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    theme.chat_user_sender.clone()
                 } else {
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    theme.chat_model_sender.clone()
                 };
                 
                 let available_width_for_ts_line = messages_area.width; // Total width available for the line
@@ -76,7 +84,7 @@ impl ChatWidget {
 
                 let mut lines_for_list_item = vec![
                     Line::from(Span::styled(format!("{}: ", msg.sender), sender_style)),
-                    Line::from(Span::styled(formatted_timestamp_str, Style::default().fg(Color::DarkGray))), 
+                    Line::from(Span::styled(formatted_timestamp_str, theme.chat_timestamp.clone())), 
                 ];
 
                 // Render thought if present
@@ -85,7 +93,7 @@ impl ChatWidget {
                         lines_for_list_item.push(Line::from("")); // Add a blank line before thought
                         let wrapped_thought: Vec<Line> = textwrap::fill(thought_text, content_width)
                             .lines()
-                            .map(|line_str| Line::from(Span::styled(line_str.to_string(), Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC))))
+                            .map(|line_str| Line::from(Span::styled(line_str.to_string(), theme.chat_thought_style.clone())))
                             .collect();
                         lines_for_list_item.extend(wrapped_thought);
                     }
@@ -94,7 +102,7 @@ impl ChatWidget {
                 // Render main content
                 let mut current_content_str = msg.content.clone();
                 if chat_session.is_streaming && idx == chat_session.messages.len() - 1 && msg.sender != "user" {
-                    current_content_str.push_str("...");
+                    current_content_str.push_str(Span::styled("...", Style::default().fg(theme.chat_streaming_indicator)).content.as_ref());
                 }
 
                 if !current_content_str.is_empty() {
@@ -106,7 +114,7 @@ impl ChatWidget {
                     
                     let wrapped_content_lines: Vec<Line> = textwrap::fill(&current_content_str, content_width)
                         .lines()
-                        .map(|line_str| Line::from(line_str.to_string())) // Default style for content
+                        .map(|line_str| Line::from(Span::styled(line_str.to_string(), Style::default().fg(theme.primary_foreground))))
                         .collect();
                     lines_for_list_item.extend(wrapped_content_lines);
                 } else if current_content_str.is_empty() && msg.thought.is_some() && !msg.thought.as_ref().unwrap_or(&String::new()).is_empty() {
@@ -121,12 +129,12 @@ impl ChatWidget {
             }).collect();
             
             let chat_list = List::new(message_items)
-                .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+                .highlight_style(theme.highlight_style.clone())
                 .highlight_symbol("> ");
 
             f.render_stateful_widget(chat_list, messages_area, &mut app.chat_list_state);
         } else {
-            f.render_widget(Paragraph::new("No active chat. Select a model from the Ollama list and press Enter.").wrap(ratatui::widgets::Wrap { trim: true }), messages_area);
+            f.render_widget(Paragraph::new("No active chat. Select a model and press Enter.").style(Style::default().fg(theme.secondary_foreground)).wrap(ratatui::widgets::Wrap { trim: true }), messages_area);
         }
     }
 }

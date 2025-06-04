@@ -1,0 +1,112 @@
+use ratatui::style::{Color, Modifier, Style}; 
+
+#[derive(Debug, Clone)]
+pub struct AppTheme {
+    // General
+    pub primary_background: Color,
+    pub primary_foreground: Color,
+    pub secondary_foreground: Color,
+    pub tertiary_foreground: Color,
+    pub border_primary: Color,
+    pub border_secondary: Color,
+    pub highlight_style: Style, // For list selections, etc.
+    pub error_text: Color,
+
+    // Status Bar
+    pub status_bar_background: Color,
+    pub status_bar_foreground: Color,
+    pub status_bar_mode_normal_bg: Color,
+    pub status_bar_mode_editing_bg: Color,
+    pub status_bar_view_name_fg: Color,
+
+    // Input Bar
+    pub input_bar_background: Color,
+    pub input_bar_text_fg: Color,
+    pub input_bar_border: Color,
+
+    // VM List
+    pub vm_list_title: Style,
+    pub vm_state_running: Color,
+    pub vm_state_stopped: Color,
+    pub vm_state_suspended: Color,
+    pub vm_state_other: Color,
+
+    // Ollama Model List
+    pub ollama_list_title: Style,
+
+    // Chat Widget
+    pub chat_title: Style,
+    pub chat_info_text: Color,
+    pub chat_user_sender: Style,
+    pub chat_model_sender: Style,
+    pub chat_thought_style: Style,
+    pub chat_timestamp: Style,
+    pub chat_streaming_indicator: Color, // For the "..." or similar
+
+    // Log View
+    pub log_title: Style,
+    pub log_level_trace: Style,
+    pub log_level_debug: Style,
+    pub log_level_info: Style,
+    pub log_level_warn: Style,
+    pub log_level_error: Style,
+    pub log_timestamp: Style,
+    pub log_target: Style,
+}
+
+impl Default for AppTheme {
+    fn default() -> Self {
+        Self {
+            // General
+            primary_background: Color::Reset, // Often means terminal default
+            primary_foreground: Color::White,
+            secondary_foreground: Color::Gray, 
+            tertiary_foreground: Color::DarkGray,
+            border_primary: Color::DarkGray,
+            border_secondary: Color::LightCyan, // Example for active borders
+            highlight_style: Style::default().add_modifier(Modifier::REVERSED),
+            error_text: Color::Red,
+
+            // Status Bar
+            status_bar_background: Color::Blue,
+            status_bar_foreground: Color::White,
+            status_bar_mode_normal_bg: Color::LightCyan,
+            status_bar_mode_editing_bg: Color::LightMagenta,
+            status_bar_view_name_fg: Color::Yellow,
+
+            // Input Bar
+            input_bar_background: Color::DarkGray,
+            input_bar_text_fg: Color::White,
+            input_bar_border: Color::White,
+
+            // VM List
+            vm_list_title: Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
+            vm_state_running: Color::Green,
+            vm_state_stopped: Color::Red,
+            vm_state_suspended: Color::Yellow,
+            vm_state_other: Color::Gray,
+
+            // Ollama Model List
+            ollama_list_title: Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD),
+
+            // Chat Widget
+            chat_title: Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            chat_info_text: Color::LightBlue,
+            chat_user_sender: Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            chat_model_sender: Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            chat_thought_style: Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC),
+            chat_timestamp: Style::default().fg(Color::DarkGray), // Keep it subtle
+            chat_streaming_indicator: Color::LightYellow,
+
+            // Log View
+            log_title: Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            log_level_trace: Style::default().fg(Color::Magenta), // Adjusted from previous direct color
+            log_level_debug: Style::default().fg(Color::Blue),
+            log_level_info: Style::default().fg(Color::Green),
+            log_level_warn: Style::default().fg(Color::Yellow),
+            log_level_error: Style::default().fg(Color::Red),
+            log_timestamp: Style::default().fg(Color::DarkGray),
+            log_target: Style::default().fg(Color::Cyan),
+        }
+    }
+} 

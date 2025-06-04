@@ -1,6 +1,6 @@
 use ratatui::{
     layout::Rect,
-    style::{Color, Style, Modifier},
+    style::{Color, Style, Modifier, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
@@ -12,46 +12,52 @@ use crate::tui::App;
 pub struct LogsWidget;
 
 impl LogsWidget {
-    pub fn render(f: &mut Frame, app: &mut App, area: Rect) { // app needs to be mutable for list_state
-        let log_items: Vec<ListItem> = app.log_entries.iter().map(|log_entry| {
-            let level_style = match log_entry.level {
-                Level::ERROR => Style::default().fg(Color::Red),
-                Level::WARN => Style::default().fg(Color::Yellow),
-                Level::INFO => Style::default().fg(Color::Cyan),
-                Level::DEBUG => Style::default().fg(Color::Green),
-                Level::TRACE => Style::default().fg(Color::Magenta),
-            };
+    pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
+        let theme = &app.theme;
 
-            let timestamp_span = Span::styled(
-                format!("{} ", log_entry.timestamp),
-                Style::default().fg(Color::DarkGray),
-            );
-            let level_span = Span::styled(
-                format!("{:<5} ", log_entry.level.as_str()), // as_str() requires tracing::Level to be in scope
-                level_style.add_modifier(Modifier::BOLD),
-            );
-            let target_span = Span::styled(
-                format!("[{}] ", log_entry.target),
-                Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
-            );
-            let message_span = Span::raw(log_entry.message.clone());
+        let title_block = Block::default()
+            .title(Line::from(Span::styled("Logs", theme.log_title)))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.border_primary));
 
-            let line = Line::from(vec![timestamp_span, level_span, target_span, message_span]);
-            ListItem::new(line)
-        }).collect();
-
-        if log_items.is_empty() {
+        if app.log_entries.is_empty() {
             let placeholder = Paragraph::new("No log entries yet.")
-                .block(Block::default().title("Logs").borders(Borders::ALL))
-                .style(Style::default().fg(Color::DarkGray));
+                .block(title_block)
+                .style(Style::default().fg(theme.secondary_foreground));
             f.render_widget(placeholder, area);
         } else {
-            let log_list = List::new(log_items)
-                .block(Block::default().title("Logs").borders(Borders::ALL))
-                .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-                .highlight_symbol("> "); // Optional: symbol for selected item
+            let log_items: Vec<ListItem> = app.log_entries.iter().map(|log_entry| {
+                let level_style = match log_entry.level {
+                    Level::ERROR => theme.log_level_error.clone(),
+                    Level::WARN => theme.log_level_warn.clone(),
+                    Level::INFO => theme.log_level_info.clone(),
+                    Level::DEBUG => theme.log_level_debug.clone(),
+                    Level::TRACE => theme.log_level_trace.clone(),
+                };
 
-            // Pass the mutable state to render_stateful_widget
+                let timestamp_span = Span::styled(
+                    format!("{} ", log_entry.timestamp),
+                    theme.log_timestamp.clone(),
+                );
+                let level_span = Span::styled(
+                    format!("{:<5} ", log_entry.level.as_str()),
+                    level_style,
+                );
+                let target_span = Span::styled(
+                    format!("[{}] ", log_entry.target),
+                    theme.log_target.clone(),
+                );
+                let message_span = Span::styled(log_entry.message.clone(), Style::default().fg(theme.primary_foreground));
+
+                let line = Line::from(vec![timestamp_span, level_span, target_span, message_span]);
+                ListItem::new(line)
+            }).collect();
+
+            let log_list = List::new(log_items)
+                .block(title_block)
+                .highlight_style(theme.highlight_style.clone())
+                .highlight_symbol("> ");
+
             f.render_stateful_widget(log_list, area, &mut app.log_list_state);
         }
     }

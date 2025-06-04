@@ -32,6 +32,9 @@ use futures::executor::block_on;
 #[cfg(feature = "ollama_integration")]
 use tokio::runtime::Handle;
 
+pub mod theme; // Add theme module
+use theme::AppTheme; // Import AppTheme
+
 pub mod widgets; // Added widgets submodule declaration
 pub mod tracing_layer; // Add this line
 use self::widgets::status_bar::StatusBarWidget; // Use the new widget
@@ -125,6 +128,7 @@ pub struct App {
     chat_stream_sender: mpsc::UnboundedSender<ChatStreamEvent>,
     chat_stream_receiver: Option<mpsc::UnboundedReceiver<ChatStreamEvent>>,
     chat_list_state: ListState,
+    theme: Arc<AppTheme>, // Add theme field
 }
 
 impl App {
@@ -163,6 +167,7 @@ impl App {
             chat_stream_sender: chat_tx,
             chat_stream_receiver: Some(chat_rx),
             chat_list_state: ListState::default(),
+            theme: Arc::new(AppTheme::default()), // Initialize theme
         };
 
         #[cfg(feature = "ollama_integration")]
