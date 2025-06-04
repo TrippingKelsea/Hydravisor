@@ -133,6 +133,18 @@ pub enum LogLevelCli {
     Error,
 }
 
+impl std::fmt::Display for LogLevelCli {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogLevelCli::Trace => write!(f, "trace"),
+            LogLevelCli::Debug => write!(f, "debug"),
+            LogLevelCli::Info => write!(f, "info"),
+            LogLevelCli::Warn => write!(f, "warn"),
+            LogLevelCli::Error => write!(f, "error"),
+        }
+    }
+}
+
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub enum LogType {
     Vm,

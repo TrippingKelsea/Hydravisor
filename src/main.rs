@@ -11,42 +11,105 @@ mod mcp;
 mod policy;
 mod session_manager;
 mod ssh_manager;
+mod ollama_manager;
 
 use anyhow::Result;
 use clap::Parser;
 use std::sync::Arc;
+use std::fs::create_dir_all; // For creating log directory
+use std::str::FromStr; // Added FromStr
 
 use cli::{Cli, Commands as CliCommands};
-use config::Config;
+use config::{Config, APP_NAME}; // Import APP_NAME
 use policy::PolicyEngine;
 use ssh_manager::SshManager;
 use audit_engine::AuditEngine;
 use env_manager::EnvironmentManager;
 use session_manager::SessionManager;
-// use mcp::McpServer; // Will be needed for MCP server
+use mcp::McpServer;
+use ollama_manager::OllamaManager;
 use tui::run_tui; // If TUI is launched from here directly
 
-use tracing::{error, info, Level, warn, debug};
-use tracing_subscriber::{filter::EnvFilter, FmtSubscriber};
+use tracing::{error, info, warn, debug}; // Removed Level as it's implicitly handled by EnvFilter/macros
+use tracing_subscriber::{
+    filter::EnvFilter,
+    fmt, // For fmt::layer()
+    layer::SubscriberExt,
+    util::SubscriberInitExt,
+    Registry, // Explicitly using Registry as the base
+};
+use tracing_appender::non_blocking::WorkerGuard; // Specific import for WorkerGuard
+use tracing_appender::rolling; // For file logging
+use xdg::BaseDirectories; // For log path
+
+// tui-logger specific imports
+use tui_logger::TuiTracingSubscriber; // Corrected import
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing subscriber with environment filter
-    // RUST_LOG=hydravisor=trace,warn (sets hydravisor to trace, others to warn)
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info")); // Default to info if RUST_LOG not set
-
-    let subscriber = FmtSubscriber::builder()
-        .with_env_filter(env_filter)
-        .with_max_level(Level::TRACE) // Allow TRACE level if filter permits
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Setting default tracing subscriber failed");
-
-    info!("Starting Hydravisor...");
-
-    // Parse CLI arguments
+    // Parse CLI arguments first to decide logging strategy
     let cli_args = Cli::parse();
+
+    // Determine if TUI is likely to run
+    let tui_mode = cli_args.command.is_none() && !cli_args.headless;
+
+    // Setup XDG directories for log path if needed
+    let xdg_dirs = BaseDirectories::with_prefix(APP_NAME)?;
+    let log_path = xdg_dirs.get_cache_home(); // Use cache home for logs
+    create_dir_all(&log_path)?; // Ensure log directory exists
+
+    // Configure tracing subscriber
+    let log_level_str = cli_args.log_level.to_string();
+    let env_filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new(&log_level_str))
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    // This guard must be kept alive for the duration of the program if file logging is used.
+    let mut _file_worker_guard: Option<WorkerGuard> = None;
+
+    let subscriber_registry = Registry::default().with(env_filter);
+
+    if tui_mode {
+        // Initialize tui-logger
+        // Map our LogLevelCli to tui_logger's understanding of level if necessary
+        // tui_logger::init_logger expects log::LevelFilter
+        let tui_max_log_level = log::LevelFilter::from_str(&log_level_str).unwrap_or(log::LevelFilter::Info);
+        tui_logger::init_logger(tui_max_log_level).expect("Failed to initialize tui-logger");
+        tui_logger::set_default_level(tui_max_log_level);
+        // Optionally, set specific levels for targets, e.g.:
+        // tui_logger::set_level_for_target("hydravisor", tui_max_log_level);
+
+        // File logging layer
+        let file_appender = rolling::daily(&log_path, format!("{}.log", APP_NAME));
+        let (non_blocking_writer, guard) = tracing_appender::non_blocking(file_appender);
+        _file_worker_guard = Some(guard); // Store the guard
+
+        let file_layer = fmt::layer()
+            .with_writer(non_blocking_writer)
+            .with_ansi(false) // No ANSI colors in file logs
+            .json(); // Use JSON format for file logs (requires 'json' feature on tracing-subscriber)
+
+        // TUI logging layer
+        let tui_layer = TuiTracingSubscriber::default(); // Captures tracing events for tui-logger
+
+        subscriber_registry
+            .with(file_layer) 
+            .with(tui_layer)  // Add TUI layer
+            .init();
+
+        info!("TUI mode detected. Logging to file and TUI. Log file: {:?}", log_path.join(format!("{}.log", APP_NAME)));
+    } else {
+        // Standard FmtSubscriber for console output
+        let console_layer = fmt::layer()
+            .with_writer(std::io::stderr) // Log to stderr for CLI
+            .with_target(true) // Show module paths
+            .with_line_number(true); // Show line numbers
+
+        subscriber_registry.with(console_layer).init();
+        info!("CLI mode detected. Logging to console.");
+    }
+
+    info!("Hydravisor initializing...");
 
     // Load configuration
     let config = match Config::load(cli_args.config.as_deref()) {
@@ -67,7 +130,7 @@ async fn main() -> Result<()> {
     // Based on cli_args.log_level and config.logging.level.
     // Current setup: EnvFilter from RUST_LOG, then default 'info'. CLI arg could modify EnvFilter upon init.
 
-    info!("Configuration loaded. Effective log level controlled by RUST_LOG or default.");
+    info!("Configuration loaded. Effective log level controlled by RUST_LOG, CLI (--log-level), or default.");
     debug!("Loaded app config: {:?}", config);
 
     // Initialize core components (Order might matter due to dependencies)
@@ -93,13 +156,7 @@ async fn main() -> Result<()> {
     debug!("Loaded SSH config: {:?}", ssh_manager.config);
 
     // AuditEngine might depend on config.logging.log_dir for its paths
-    let audit_engine = match AuditEngine::new(&config) {
-        Ok(engine) => Arc::new(engine),
-        Err(e) => {
-            error!("Failed to initialize Audit Engine: {}", e);
-            return Err(e.into());
-        }
-    };
+    let audit_engine = Arc::new(AuditEngine::new(&config)?);
     info!("Audit Engine initialized.");
 
     let env_manager = match EnvironmentManager::new(&config) {
@@ -111,6 +168,35 @@ async fn main() -> Result<()> {
     };
     info!("Environment Manager initialized.");
 
+    let ollama_manager_result = OllamaManager::new(&config);
+    let ollama_manager = match ollama_manager_result {
+        Ok(manager) => {
+            info!("Ollama Manager initialized successfully.");
+            Arc::new(manager)
+        }
+        Err(e) => {
+            warn!("Ollama Manager failed to initialize: {}. Ollama features might be unavailable or limited.", e);
+            // Depending on whether ollama_integration feature is critical, either return Err or proceed with a non-functional manager.
+            // For now, we proceed, and OllamaManager::new should ideally return a struct that reflects its non-operational state if the feature is off.
+            // If the feature is on and it fails, it should have been an Err from new() that would be propagated by the original `?` or explicit return.
+            // The current OllamaManager::new is Result<Self, anyhow::Error>.
+            // If ollama_integration is disabled, it should ideally return Ok with a benign version of OllamaManager.
+            // If ollama_integration is enabled and it fails, new() itself returns Err. We are catching it here.
+            #[cfg(feature = "ollama_integration")]
+            {
+                error!("Ollama Manager critical initialization failed (ollama_integration enabled): {}", e);
+                return Err(e.into()); // Fatal if feature is on
+            }
+            // If feature is not on, we might proceed with a default/non-functional OllamaManager.
+            // This requires OllamaManager::new() to behave differently based on the feature or for us to create a dummy here.
+            // For simplicity, if new() returns Err and feature is off, it implies an unexpected issue (e.g. config error for ollama even if feature off).
+            // Let's assume OllamaManager::new() handles the feature flag internally and returns a usable (even if non-functional) instance if the feature is off.
+            // So an Err here, even with the feature off, might mean bad config. For now, we proceed with a default.
+            warn!("Proceeding without fully functional Ollama Manager due to: {}", e);
+            Arc::new(OllamaManager::default()) // Assuming a Default impl that represents a non-functional manager
+        }
+    };
+
     let session_manager = match SessionManager::new(Arc::clone(&config), Arc::clone(&env_manager), Arc::clone(&policy_engine), Arc::clone(&ssh_manager), Arc::clone(&audit_engine)) {
         Ok(manager) => Arc::new(manager),
         Err(e) => {
@@ -120,39 +206,38 @@ async fn main() -> Result<()> {
     };
     info!("Session Manager initialized.");
 
-    // TODO: Initialize MCP Server (will require tokio tasks)
-    // let mcp_server = McpServer::start(Arc::clone(&config), /* dispatcher channel */).await?;
-    // info!("MCP Server started.");
+    // McpServer will be initialized and started on demand via CLI or TUI action.
 
     // Dispatch based on CLI arguments
     if let Some(command) = cli_args.command {
-        info!("Handling CLI command...");
         cli::handle_command(
-            command, 
+            command, // CliCommand enum variant
             Arc::clone(&config),
             Arc::clone(&policy_engine),
-            // Add other managers as needed by CLI commands
+            // SshManager is not currently taken by handle_command, will add later if needed by subcommands
+            // Arc::clone(&ssh_manager),
             Arc::clone(&session_manager),
             Arc::clone(&env_manager),
             Arc::clone(&audit_engine),
-        ).await?;
-    } else if !cli_args.headless {
-        info!("No subcommand provided and not headless, launching TUI...");
-        // Ensure TUI runs in a blocking manner or main awaits it if TUI itself is async.
-        run_tui(
+            // OllamaManager is not currently taken by handle_command
+            // Arc::clone(&ollama_manager),
+        )
+        .await?;
+    } else if !cli_args.headless { // Use cli_args.headless
+        // Launch TUI if no subcommand and not headless
+        info!("No subcommand provided and not headless, launching TUI.");
+        crate::tui::run_tui(
             Arc::clone(&config),
-            Arc::clone(&session_manager), 
+            Arc::clone(&session_manager),
             Arc::clone(&policy_engine),
             Arc::clone(&env_manager),
-            Arc::clone(&audit_engine)
-            // Pass other components as needed by the TUI
-        )?;
+            Arc::clone(&audit_engine),
+            Arc::clone(&ollama_manager),
+        )?; // run_tui is not async
     } else {
-        info!("Headless mode, no command. Hydravisor will idle or perform background tasks.");
-        // TODO: Implement headless background tasks if any (e.g. MCP server listening)
-        // For now, just exits.
-        // If MCP server was started, main would need to await its termination signal or run indefinitely.
-        println!("Hydravisor running in headless mode. No command given. Exiting.");
+        info!("No subcommand provided and running in headless mode. Exiting.");
+        // Optionally, print help here using clap if no command is given
+        // cli::Cli::command().print_help()?;
     }
 
     info!("Hydravisor shutting down.");

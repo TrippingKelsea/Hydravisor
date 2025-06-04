@@ -32,6 +32,8 @@ pub struct Config {
     pub policy_file_path: Option<PathBuf>,
     #[serde(skip)]
     pub ssh_config_file_path: Option<PathBuf>,
+    pub ollama_host: Option<String>,
+    pub ollama_port: Option<u16>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -286,6 +288,8 @@ impl Default for Config {
             mcp: McpConfig::default(),
             policy_file_path: None, // Determined at load time
             ssh_config_file_path: None, // Determined at load time
+            ollama_host: None,
+            ollama_port: None,
         }
     }
 }

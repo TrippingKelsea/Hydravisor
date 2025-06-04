@@ -15,7 +15,8 @@ ratatui = { version = "0.26.0", features = ["crossterm"] } # Updated to 0.26.0
 crossterm = "0.27.0"
 thiserror = "1.0"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
 xdg = "2.5.2"
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
@@ -23,6 +24,10 @@ uuid = { version = "1.7.0", features = ["v4", "serde"] }
 shellexpand = "3.1.0"
 jsonschema = "0.17.1"
 virt = { version = "0.4.2", optional = true }
+ollama-rs = { version = "0.1.9", optional = true, features = ["stream"] }
+futures = "0.3" # For block_on
+tui-logger = { version = "0.10.0", features = ["tracing-support"] } # For TUI logging widget, added tracing-support
+log = "0.4" # For log::LevelFilter used by tui-logger
 
 # Placeholder for potential future dependencies from design docs
 # libvirt-rs = { version = "0.7", optional = true } # For KVM
@@ -35,3 +40,4 @@ virt = { version = "0.4.2", optional = true }
 default = ["libvirt_integration"] # Make libvirt_integration a default feature
 libvirt_integration = ["dep:virt"] # Feature to enable libvirt integration
 dummy_env_data = [] # New feature for enabling dummy VM data
+ollama_integration = ["dep:ollama-rs"] # Feature to enable Ollama integration
