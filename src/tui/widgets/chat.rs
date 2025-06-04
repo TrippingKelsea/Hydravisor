@@ -7,8 +7,36 @@ use ratatui::{
     Frame,
 };
 use crate::tui::App;
+use unicode_width;
 
 pub struct ChatWidget;
+
+// Helper function for simple character-based wrapping (UTF-8 aware)
+fn wrap_text(text: &str, width: u16) -> Vec<String> {
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+    let mut current_width = 0;
+    for c in text.chars() {
+        let char_width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16;
+        if current_width + char_width > width {
+            lines.push(current_line.clone());
+            current_line.clear();
+            current_width = 0;
+        }
+        current_line.push(c);
+        current_width += char_width;
+    }
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+    if lines.is_empty() && !text.is_empty() { // Handle case where text is shorter than width or width is very small
+        lines.push(text.to_string());
+    }
+    lines
+}
 
 impl ChatWidget {
     // app needs to be mutable for chat_list_state
@@ -48,6 +76,11 @@ impl ChatWidget {
         let messages_area = right_pane_block.inner(chunks[1]);
         f.render_widget(right_pane_block, chunks[1]);
 
+        // Calculate available width for message content (subtracting a bit for padding/sender name if needed)
+        // For simplicity, using messages_area.width directly for wrapping text content.
+        // A more precise calculation might subtract space for sender, timestamp, list markers, etc.
+        let content_width = messages_area.width.saturating_sub(4); // Approx: 2 for borders/padding, 2 for list marker + space
+
         if let Some(chat_session) = &mut app.active_chat { // Changed to &mut for chat_list_state later
             let message_items: Vec<ListItem> = chat_session.messages.iter().enumerate().map(|(idx, msg)| {
                 let sender_style = if msg.sender == "user" {
@@ -61,24 +94,18 @@ impl ChatWidget {
                     current_content_str.push_str("...");
                 }
 
-                // Each line of the potentially multi-line content becomes an owned String, then a Line
-                let content_lines: Vec<Line> = current_content_str
-                    .lines()
-                    .map(|s| Line::from(s.to_string())) // Convert to owned String for the Line
+                let wrapped_content_lines: Vec<Line> = wrap_text(&current_content_str, content_width)
+                    .into_iter()
+                    .map(Line::from)
                     .collect();
-                let message_text_widget = Text::from(content_lines);
 
-                // Construct the list item content
                 let mut lines_for_list_item = vec![
                     Line::from(Span::styled(format!("{}: ", msg.sender), sender_style)),
                     Line::from(Span::styled(format!("  (@{})", msg.timestamp), Style::default().fg(Color::DarkGray))).alignment(ratatui::layout::Alignment::Right),
-                    Line::from(""), // Spacer line before content
+                    Line::from(""), 
                 ];
-                
-                // Add all lines from the message_text_widget
-                // Since message_text_widget.lines is Vec<Line<'a>>, and we need owned for ListItem, we ensure above conversion
-                lines_for_list_item.extend(message_text_widget.lines); // Now this should be Vec<Line<'static>> effectively due to .to_string()
-                lines_for_list_item.push(Line::from("")); // Spacer line after content
+                lines_for_list_item.extend(wrapped_content_lines);
+                lines_for_list_item.push(Line::from("")); 
 
                 ListItem::new(Text::from(lines_for_list_item))
             }).collect();
