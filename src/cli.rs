@@ -2,8 +2,14 @@
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::config::Config;
+use crate::policy::PolicyEngine;
+use crate::session_manager::SessionManager;
+use crate::env_manager::EnvironmentManager;
+use crate::audit_engine::AuditEngine;
+
 use anyhow::Result;
 
 /// Hydravisor: AI Agent Sandbox Manager
@@ -19,7 +25,8 @@ pub struct Cli {
     pub headless: bool,
 
     /// Set log level
-    #[clap(long, value_name = "LEVEL", value_enum, default_value_t = LogLevelCli::Info)] pub log_level: LogLevelCli,
+    #[clap(long, value_name = "LEVEL", value_enum, default_value_t = LogLevelCli::Info)]
+    pub log_level: LogLevelCli,
 
     #[clap(subcommand)]
     pub command: Option<Commands>,
@@ -48,10 +55,10 @@ pub enum Commands {
 #[derive(Subcommand, Debug)]
 pub enum PolicyCommands {
     /// Validate the policy.toml file
-    Validate {        
+    Validate {
         /// Optional path to the policy file
         #[clap(long, value_name = "FILE")]
-        path: Option<PathBuf> 
+        path: Option<PathBuf>,
     },
     /// Simulate an authorization decision
     Check {
@@ -80,8 +87,8 @@ pub enum VmCommands {
     /// List known VM sessions or configurations
     List,
     /// Show VM state, logs, and bindings
-    Info { 
-        vm_id: String 
+    Info {
+        vm_id: String
     },
     /// Export current VM as an archive
     Snapshot {
@@ -95,15 +102,15 @@ pub enum VmCommands {
 #[derive(Subcommand, Debug)]
 pub enum LogCommands {
     /// Show available session logs
-    List { 
+    List {
         #[clap(long, value_enum, default_value_t = LogType::Vm)]
-        log_type: LogType, // As per config.toml.md example `hydravisor logs list --type=vm`
+        log_type: LogType,
         #[clap(long, default_value_t = 10)]
         limit: usize,
     },
     /// View logs (e.g., .log, .cast, .jsonl)
-    View { 
-        session_id: String // As per config.toml.md example
+    View {
+        session_id: String
     },
     /// Export logs to a target directory or convert to playback format
     Export {
@@ -114,7 +121,7 @@ pub enum LogCommands {
         output: PathBuf,
     }
     // TODO: `log replay` (future)
-    // TODO: `audit verify` from config.toml.md (should this be under `log audit verify` or `policy audit verify` or just `audit verify`? -> leaning towards a top-level `audit` command)
+    // TODO: `audit verify` from config.toml.md
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -130,108 +137,175 @@ pub enum LogLevelCli {
 pub enum LogType {
     Vm,
     Container,
-    System, // For general system logs
-    Mcp,    // For MCP activity
-    Audit,  // For the audit ledger
+    System,
+    Mcp,
+    Audit,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub enum LogFormat {
     Cast,
     Jsonl,
-    Ansi, // Raw ANSI
+    Ansi,
 }
 
-pub fn handle_command(cli_args: Cli, config: &Config) -> Result<()> {
-    if let Some(command) = cli_args.command {
-        match command {
-            Commands::Policy(policy_cmd) => handle_policy_command(policy_cmd, config)?,
-            Commands::Agent(agent_cmd) => handle_agent_command(agent_cmd, config)?,
-            Commands::Vm(vm_cmd) => handle_vm_command(vm_cmd, config)?,
-            Commands::Log(log_cmd) => handle_log_command(log_cmd, config)?,
-        }
-    } else if cli_args.headless {
-        // Headless mode, no TUI, no specific command. What to do?
-        // Perhaps run a default background service if that's a use case?
-        // Or simply print help.
-        println!("Running in headless mode with no command. Hydravisor might perform background tasks or await MCP connections if configured.");
-        // For now, just indicate it's headless.
-        todo!("Define behavior for headless mode without specific command.")
+pub async fn handle_command(
+    command: Commands, // Now it's guaranteed to be Some by main.rs
+    config: Arc<Config>,
+    policy_engine: Arc<PolicyEngine>,
+    session_manager: Arc<SessionManager>,
+    env_manager: Arc<EnvironmentManager>,
+    audit_engine: Arc<AuditEngine>,
+) -> Result<()> {
+    match command {
+        Commands::Policy(policy_cmd) => handle_policy_command(policy_cmd, config, policy_engine).await?,
+        Commands::Agent(agent_cmd) => handle_agent_command(agent_cmd, config, session_manager).await?,
+        Commands::Vm(vm_cmd) => handle_vm_command(vm_cmd, config, env_manager).await?,
+        Commands::Log(log_cmd) => handle_log_command(log_cmd, config, audit_engine).await?,
     }
-    // If command is None and not headless, main.rs handles TUI launch.
     Ok(())
 }
 
-fn handle_policy_command(command: PolicyCommands, config: &Config) -> Result<()> {
+async fn handle_policy_command(
+    command: PolicyCommands, 
+    _config: Arc<Config>, // Renamed to avoid unused warning for now
+    policy_engine: Arc<PolicyEngine>
+) -> Result<()> {
     match command {
         PolicyCommands::Validate { path } => {
-            println!("Policy validate command: Path: {:?}, Config: {:?}", path, config);
-            // TODO: Implement policy validation logic from policy_cli_tools.md
-            // 1. Determine policy file path (use `path` or default from config/XDG)
-            // 2. Load policy.toml
-            // 3. Load policy.schema.json (how to bundle/locate this?)
-            // 4. Validate using a JSON schema validator crate (e.g. jsonschema)
-            todo!("Implement policy validation");
+            println!("Policy validate command: Path to validate explicitly: {:?}", path);
+
+            // 1. Determine the policy content to validate.
+            let (policy_value, policy_source_description): (serde_json::Value, String) = if let Some(p) = path {
+                let policy_str = std::fs::read_to_string(&p)
+                    .map_err(|e| anyhow::anyhow!("Failed to read policy file {:?}: {}", p, e))?;
+                let parsed_policy_toml: toml::Value = toml::from_str(&policy_str)
+                    .map_err(|e| anyhow::anyhow!("Failed to parse TOML from policy file {:?}: {}", p, e))?;
+                // Convert toml::Value to serde_json::Value for jsonschema validation
+                let json_value = serde_json::to_value(parsed_policy_toml)?;
+                (json_value, format!("file '{}'", p.display()))
+            } else if let Some(loaded_path_str) = &policy_engine.config.source_path {
+                // If no path override, validate the currently loaded policy.
+                // Need to re-serialize PolicyConfig to toml::Value then to serde_json::Value, 
+                // or find a more direct way if PolicyConfig can be directly validated (if it derives Serialize for jsonschema)
+                // For now, let's assume we need to get it as a Value.
+                // This is a bit convoluted; ideally, PolicyConfig itself could be validated if its structure matches the schema directly.
+                let policy_as_toml_value = toml::Value::try_from(&policy_engine.config)?;
+                let json_value = serde_json::to_value(policy_as_toml_value)?;
+                (json_value, format!("currently loaded policy from '{}'", loaded_path_str))
+            } else {
+                anyhow::bail!("No policy file specified for validation and no policy file was loaded initially.");
+            };
+
+            // 2. Load the JSON schema.
+            // TODO: Consider embedding the schema using include_str! for robustness.
+            let schema_path = PathBuf::from("technical_design/policy.schema.json");
+            let schema_str = std::fs::read_to_string(&schema_path)
+                .map_err(|e| anyhow::anyhow!("Failed to read policy schema file {:?}: {}", schema_path, e))?;
+            let schema_json: serde_json::Value = serde_json::from_str(&schema_str)
+                .map_err(|e| anyhow::anyhow!("Failed to parse policy schema JSON from {:?}: {}", schema_path, e))?;
+            
+            let compiled_schema = jsonschema::JSONSchema::compile(&schema_json)
+                .map_err(|e| anyhow::anyhow!("Failed to compile policy JSON schema: {}", e))?;
+
+            // 3. Validate the policy content against the schema.
+            match compiled_schema.validate(&policy_value) {
+                Ok(_) => {
+                    println!("SUCCESS: Policy from {} is valid against the JSON schema.", policy_source_description);
+                    // TODO: Add internal consistency checks from PolicyEngine if needed for the validated content.
+                    // For example: `PolicyEngine::validate_internal_consistency(parsed_policy_config_if_loaded_from_path)?`
+                }
+                Err(errors) => {
+                    let error_messages: Vec<String> = errors.map(|e| format!("  - {}", e)).collect();
+                    anyhow::bail!("ERROR: Policy from {} is INVALID against the JSON schema:\n{}", policy_source_description, error_messages.join("\n"));
+                }
+            }
+            // Ok(())
+            todo!("Refine validation output and add internal consistency checks via PolicyEngine method.");
         }
         PolicyCommands::Check { agent_id, vm_id, action } => {
-            println!("Policy check command: Agent: {}, VM: {}, Action: {}, Config: {:?}", agent_id, vm_id, action, config);
+            println!("Policy check command: Agent: {}, VM: {}, Action: {}", agent_id, vm_id, action);
             // TODO: Implement policy check simulation from policy_cli_tools.md
-            // 1. Load policy.toml
-            // 2. Simulate authorization
-            todo!("Implement policy check");
+            // 1. Load policy.toml (already available in policy_engine.config)
+            // 2. Simulate authorization using policy_engine.check_permission()
+            //    - Construct an AuthRequest.
+            //    - Print the AuthDecision.
+            todo!("Implement policy check simulation using PolicyEngine.");
         }
     }
     // Ok(())
 }
 
-fn handle_agent_command(command: AgentCommands, config: &Config) -> Result<()> {
+async fn handle_agent_command(
+    command: AgentCommands,
+    _config: Arc<Config>,
+    _session_manager: Arc<SessionManager> // Added, marked unused for now
+) -> Result<()> {
     match command {
         AgentCommands::List => {
-            println!("Agent list command, Config: {:?}", config);
-            todo!("Implement agent list");
+            println!("Agent list command");
+            // TODO: Use _session_manager
+            todo!("Implement agent list - requires SessionManager or other state tracking agents");
         }
         AgentCommands::Info { agent_id } => {
-            println!("Agent info command: AgentID: {}, Config: {:?}", agent_id, config);
-            todo!("Implement agent info");
+            println!("Agent info command: AgentID: {}", agent_id);
+            // TODO: Use _session_manager
+            todo!("Implement agent info - requires SessionManager or other state tracking agents");
         }
     }
     // Ok(())
 }
 
-fn handle_vm_command(command: VmCommands, config: &Config) -> Result<()> {
+async fn handle_vm_command(
+    command: VmCommands,
+    _config: Arc<Config>,
+    _env_manager: Arc<EnvironmentManager> // Added, marked unused for now
+) -> Result<()> {
     match command {
         VmCommands::List => {
-            println!("VM list command, Config: {:?}", config);
-            todo!("Implement VM list");
+            println!("VM list command");
+            // TODO: Use _env_manager
+            todo!("Implement VM list - requires EnvManager");
         }
         VmCommands::Info { vm_id } => {
-            println!("VM info command: VM_ID: {}, Config: {:?}", vm_id, config);
-            todo!("Implement VM info");
+            println!("VM info command: VM_ID: {}", vm_id);
+            // TODO: Use _env_manager
+            todo!("Implement VM info - requires EnvManager");
         }
         VmCommands::Snapshot { vm_id, output } => {
-            println!("VM snapshot command: VM_ID: {}, Output: {:?}, Config: {:?}", vm_id, output, config);
-            todo!("Implement VM snapshot");
+            println!("VM snapshot command: VM_ID: {}, Output: {:?}", vm_id, output);
+            // TODO: Use _env_manager
+            todo!("Implement VM snapshot - requires EnvManager");
         }
     }
     // Ok(())
 }
 
-fn handle_log_command(command: LogCommands, config: &Config) -> Result<()> {
+async fn handle_log_command(
+    command: LogCommands,
+    _config: Arc<Config>,
+    _audit_engine: Arc<AuditEngine> // Added, marked unused for now
+) -> Result<()> {
     match command {
         LogCommands::List { log_type, limit } => {
-            println!("Log list command: Type: {:?}, Limit: {}, Config: {:?}", log_type, limit, config);
-            todo!("Implement log list");
+            println!("Log list command: Type: {:?}, Limit: {}", log_type, limit);
+            // TODO: Use _audit_engine
+            todo!("Implement log list - requires AuditEngine or direct log file access logic");
         }
         LogCommands::View { session_id } => {
-            println!("Log view command: SessionID: {}, Config: {:?}", session_id, config);
-            todo!("Implement log view");
+            println!("Log view command: SessionID: {}", session_id);
+            // TODO: Use _audit_engine
+            todo!("Implement log view - requires AuditEngine or direct log file access logic");
         }
         LogCommands::Export { session_id, format, output } => {
-            println!("Log export command: SessionID: {}, Format: {:?}, Output: {:?}, Config: {:?}", session_id, format, output, config);
-            todo!("Implement log export");
+            println!("Log export command: SessionID: {}, Format: {:?}, Output: {:?}", session_id, format, output);
+            // TODO: Use _audit_engine
+            todo!("Implement log export - requires AuditEngine or direct log file access logic");
         }
     }
     // Ok(())
 }
+
+// TODO: Add tests for CLI parsing and command handling (mocking components)
 
 // TODO: Add tests for CLI parsing 

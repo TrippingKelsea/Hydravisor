@@ -2,7 +2,7 @@
 // Policy Engine: Loads, interprets, and enforces security policies from policy.toml
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::{debug, info, warn};
@@ -12,7 +12,7 @@ use crate::errors::HydraError;
 
 // Main structure for the parsed policy.toml file
 // Maps to the structure defined in policy.schema.json and policy.toml.md
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyConfig {
     #[serde(default)]
@@ -27,11 +27,11 @@ pub struct PolicyConfig {
     pub recording: SessionRecordingPolicy,
     
     // Not part of the TOML file itself, but where it was loaded from
-    #[serde(skip)]
+    #[serde(skip_serializing)]
     pub source_path: Option<String>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct RoleDefinition {
     pub can_create: bool,
@@ -42,14 +42,14 @@ pub struct RoleDefinition {
     // pub network_access: Option<String>, // e.g., "full", "restricted", "none"
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct AgentPermissionOverride {
     pub role: String, // Reference to a key in [roles]
     pub override_settings: Option<OverrideSettings>, // Field name adjusted for clarity
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct OverrideSettings { // Corresponds to `override` in TOML
     pub can_create: Option<bool>,
@@ -57,7 +57,7 @@ pub struct OverrideSettings { // Corresponds to `override` in TOML
     pub audited: Option<bool>, // Allow overriding audited status too
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct AuditPolicySettings {
     #[serde(default = "default_true")] // log_denied defaults to true
@@ -81,14 +81,14 @@ impl Default for AuditPolicySettings {
 }
 
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct DefaultVmSettings {
     #[serde(default)]
     pub vm: VmResourceLimits, // Corresponds to [defaults.vm] in TOML
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct VmResourceLimits {
     #[serde(default = "default_cpu_limit")]
@@ -123,7 +123,7 @@ impl Default for DefaultVmSettings { // For the outer [defaults] table
     }
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct SessionRecordingPolicy {
     #[serde(default = "default_record_for_roles")]

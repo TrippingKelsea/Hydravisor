@@ -21,6 +21,7 @@ anyhow = "1.0" # For easy error handling in main/CLI
 chrono = { version = "0.4", features = ["serde"] } # For TUI timestamp
 uuid = { version = "1", features = ["v4", "serde"] } # For session IDs
 shellexpand = "3.1" # For expanding tilde in paths
+jsonschema = "0.17" # For policy validation
 
 # Placeholder for potential future dependencies from design docs
 # libvirt-rs = { version = "0.7", optional = true } # For KVM
