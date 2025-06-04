@@ -9,7 +9,6 @@ use std::os::unix::fs::PermissionsExt; // Added for Permissions::from_mode
 use tracing::{debug, info, warn};
 
 use crate::config::Config as AppConfig; // Renamed to avoid conflict with SshConfig below
-use crate::errors::HydraError;
 
 // Structure for the parsed ssh.toml file
 #[derive(Deserialize, Debug, Clone, Default)]

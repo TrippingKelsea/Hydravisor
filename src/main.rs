@@ -1,3 +1,4 @@
+#![allow(clippy::all)] // TEMPORARY: To reduce noise during refactoring
 // src/main.rs
 
 mod cli;
@@ -17,18 +18,16 @@ use anyhow::Result;
 use clap::Parser;
 use std::sync::Arc;
 use std::fs::create_dir_all; // For creating log directory
-use std::str::FromStr; // Added FromStr
+use std::str::FromStr; // RE-ADDED THIS LINE
 
-use cli::{Cli, Commands as CliCommands};
+use cli::Cli;
 use config::{Config, APP_NAME}; // Import APP_NAME
 use policy::PolicyEngine;
 use ssh_manager::SshManager;
 use audit_engine::AuditEngine;
 use env_manager::EnvironmentManager;
 use session_manager::SessionManager;
-use mcp::McpServer;
 use ollama_manager::OllamaManager;
-use tui::run_tui; // If TUI is launched from here directly
 
 use tracing::{error, info, warn, debug}; // Removed Level as it's implicitly handled by EnvFilter/macros
 use tracing_subscriber::{
@@ -43,7 +42,7 @@ use tracing_appender::rolling; // For file logging
 use xdg::BaseDirectories; // For log path
 
 // tui-logger specific imports
-use tui_logger::TuiTracingSubscriber; // Corrected import
+use tui_logger::TuiTracingSubscriberLayer; // Corrected import to TuiTracingSubscriberLayer
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -70,14 +69,13 @@ async fn main() -> Result<()> {
     let subscriber_registry = Registry::default().with(env_filter);
 
     if tui_mode {
-        // Initialize tui-logger
-        // Map our LogLevelCli to tui_logger's understanding of level if necessary
-        // tui_logger::init_logger expects log::LevelFilter
+        // Map our LogLevelCli to tui_logger's understanding of level
         let tui_max_log_level = log::LevelFilter::from_str(&log_level_str).unwrap_or(log::LevelFilter::Info);
-        tui_logger::init_logger(tui_max_log_level).expect("Failed to initialize tui-logger");
-        tui_logger::set_default_level(tui_max_log_level);
-        // Optionally, set specific levels for targets, e.g.:
-        // tui_logger::set_level_for_target("hydravisor", tui_max_log_level);
+        tui_logger::set_default_level(tui_max_log_level); // This sets the *display* filter for the TUI widget
+        // Explicitly set the level for the main application target
+        tui_logger::set_level_for_target(APP_NAME, tui_max_log_level); 
+        // Optionally, set for other crates if their logs are desired in TUI and noisy, e.g.:
+        // tui_logger::set_level_for_target("hyper", log::LevelFilter::Warn);
 
         // File logging layer
         let file_appender = rolling::daily(&log_path, format!("{}.log", APP_NAME));
@@ -90,7 +88,7 @@ async fn main() -> Result<()> {
             .json(); // Use JSON format for file logs (requires 'json' feature on tracing-subscriber)
 
         // TUI logging layer
-        let tui_layer = TuiTracingSubscriber::default(); // Captures tracing events for tui-logger
+        let tui_layer = TuiTracingSubscriberLayer; // Corrected: Instantiate as a unit struct
 
         subscriber_registry
             .with(file_layer) 
@@ -175,25 +173,17 @@ async fn main() -> Result<()> {
             Arc::new(manager)
         }
         Err(e) => {
-            warn!("Ollama Manager failed to initialize: {}. Ollama features might be unavailable or limited.", e);
-            // Depending on whether ollama_integration feature is critical, either return Err or proceed with a non-functional manager.
-            // For now, we proceed, and OllamaManager::new should ideally return a struct that reflects its non-operational state if the feature is off.
-            // If the feature is on and it fails, it should have been an Err from new() that would be propagated by the original `?` or explicit return.
-            // The current OllamaManager::new is Result<Self, anyhow::Error>.
-            // If ollama_integration is disabled, it should ideally return Ok with a benign version of OllamaManager.
-            // If ollama_integration is enabled and it fails, new() itself returns Err. We are catching it here.
             #[cfg(feature = "ollama_integration")]
             {
                 error!("Ollama Manager critical initialization failed (ollama_integration enabled): {}", e);
                 return Err(e.into()); // Fatal if feature is on
             }
-            // If feature is not on, we might proceed with a default/non-functional OllamaManager.
-            // This requires OllamaManager::new() to behave differently based on the feature or for us to create a dummy here.
-            // For simplicity, if new() returns Err and feature is off, it implies an unexpected issue (e.g. config error for ollama even if feature off).
-            // Let's assume OllamaManager::new() handles the feature flag internally and returns a usable (even if non-functional) instance if the feature is off.
-            // So an Err here, even with the feature off, might mean bad config. For now, we proceed with a default.
-            warn!("Proceeding without fully functional Ollama Manager due to: {}", e);
-            Arc::new(OllamaManager::default()) // Assuming a Default impl that represents a non-functional manager
+            #[cfg(not(feature = "ollama_integration"))]
+            // This path should be unreachable because OllamaManager::new() for non-featured always returns Ok.
+            // If it were to return Err, this would be a panic indicating a logic flaw.
+            {
+                unreachable!("OllamaManager::new() returned Err when ollama_integration was disabled. Error: {}", e);
+            }
         }
     };
 

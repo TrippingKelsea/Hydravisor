@@ -14,7 +14,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Terminal,
 };
-use std::{io::{self, Stdout}, sync::Arc, time::{Duration, Instant}, str::FromStr};
+use std::{io::{self, Stdout}, sync::Arc, time::{Duration, Instant}};
 use chrono::Local;
 
 use crate::config::Config;
@@ -33,7 +33,8 @@ use futures::executor::block_on;
 use tokio::runtime::Handle;
 
 // tui-logger imports
-use tui_logger::{TuiLoggerSmartWidget, TuiLoggerLevelOutput, TuiWidgetState, Level as TuiLoggerLevelEnum}; // Use a distinct alias
+use tui_logger::{TuiLoggerSmartWidget, TuiWidgetState, TuiWidgetEvent};
+// No separate import for tui_logger::Input; will use full path.
 
 // Define different views for the TUI
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,13 +105,7 @@ impl App {
         audit_engine: Arc<AuditEngine>,
         ollama_manager: Arc<OllamaManager>,
     ) -> Self {
-        let mut log_widget_state = TuiWidgetState::new();
-        // Configure TuiWidgetState to filter messages. This uses log::LevelFilter.
-        // The log level from CLI args (parsed in main.rs and used for tui_logger::init_logger)
-        // will act as the MAX level for tui-logger to capture.
-        // Here, we can set a LESS STRICT filter for the widget itself initially, if desired,
-        // or align it. For now, let's default to showing Info and above in the widget.
-        log_widget_state.set_default_level_filter(log::LevelFilter::Info);
+        let log_widget_state = TuiWidgetState::new();
 
         let mut app = Self {
             should_quit: false,
@@ -146,7 +141,6 @@ impl App {
                 tracing::error!("Error: Not in a Tokio runtime context. Cannot fetch Ollama models for TUI.");
                  app.ollama_models = vec![LocalModel{name: "Tokio runtime error - No models loaded".to_string(), modified_at: "N/A".to_string(), size: 0 }];
             }
-
             if !app.ollama_models.is_empty() {
                 app.ollama_model_list_state.select(Some(0));
             }
@@ -155,7 +149,6 @@ impl App {
         {
             app.ollama_models.push("Ollama integration disabled.".to_string());
         }
-        
         app.fetch_vms();
         if !app.vms.is_empty() {
             app.vm_list_state.select(Some(0));
@@ -186,26 +179,84 @@ impl App {
     }
 
     pub fn on_key(&mut self, key_event: KeyEvent) {
-        let mut key_handled_by_logger_or_global_nav = false;
+        let mut event_consumed = false;
 
         if self.active_view == TuiView::Logs && self.input_mode == InputMode::Normal {
-            self.log_widget_state.transition_to_capture_key_input(); 
-            self.log_widget_state.handle_key_event(key_event);
-            key_handled_by_logger_or_global_nav = true; // Assume logger tried or will handle it.
-            
+            // Global keys like 'q' for quit and 'Tab' for view switching are handled first.
             match key_event.code {
-                KeyCode::Char('q') => self.should_quit = true,
+                KeyCode::Char('q') => {
+                    self.should_quit = true;
+                    event_consumed = true;
+                }
                 KeyCode::Tab => {
-                    self.active_view = TuiView::VmList;
+                    self.active_view = TuiView::VmList; // Cycle from Logs to VmList
                     self.vm_list_state.select(if self.vms.is_empty() { None } else { Some(0) });
                     #[cfg(feature = "ollama_integration")]
                     self.ollama_model_list_state.select(if self.ollama_models.is_empty() { None } else { Some(0) });
+                    event_consumed = true;
                 }
-                _ => { }
+                // Map keys to TuiWidgetEvent for tui-logger state transition
+                KeyCode::Up => {
+                    self.log_widget_state.transition(&TuiWidgetEvent::UpKey);
+                    event_consumed = true;
+                }
+                KeyCode::Down => {
+                    self.log_widget_state.transition(&TuiWidgetEvent::DownKey);
+                    event_consumed = true;
+                }
+                KeyCode::PageUp => {
+                    self.log_widget_state.transition(&TuiWidgetEvent::PrevPageKey);
+                    event_consumed = true;
+                }
+                KeyCode::PageDown => {
+                    self.log_widget_state.transition(&TuiWidgetEvent::NextPageKey);
+                    event_consumed = true;
+                }
+                KeyCode::Left => {
+                    self.log_widget_state.transition(&TuiWidgetEvent::LeftKey);
+                    event_consumed = true;
+                }
+                KeyCode::Right => {
+                    self.log_widget_state.transition(&TuiWidgetEvent::RightKey);
+                    event_consumed = true;
+                }
+                KeyCode::Char('h') => {
+                    self.log_widget_state.transition(&TuiWidgetEvent::HideKey);
+                    event_consumed = true;
+                }
+                KeyCode::Char('f') => {
+                    self.log_widget_state.transition(&TuiWidgetEvent::FocusKey);
+                    event_consumed = true;
+                }
+                KeyCode::Char('-') => {
+                    self.log_widget_state.transition(&TuiWidgetEvent::MinusKey);
+                    event_consumed = true;
+                }
+                KeyCode::Char('+') | KeyCode::Char('=') => { // '=' is often unshifted '+'
+                    self.log_widget_state.transition(&TuiWidgetEvent::PlusKey);
+                    event_consumed = true;
+                }
+                KeyCode::Esc => {
+                     self.log_widget_state.transition(&TuiWidgetEvent::EscapeKey);
+                     event_consumed = true;
+                }
+                KeyCode::Char(' ') => {
+                    self.log_widget_state.transition(&TuiWidgetEvent::SpaceKey);
+                    event_consumed = true;
+                }
+                // KeyCode::Char('?') for ToggleHelpKey - check if modifiers are involved
+                // KeyCode::Char('d') for ToggleDisplayModeKey
+
+                // TODO: Add mappings for ToggleHelpKey ('?') and ToggleDisplayModeKey ('d')
+                // For now, unmapped keys fall through.
+                _ => {
+                    // event_consumed remains false, will be handled by general input logic if any
+                }
             }
         }
 
-        if !key_handled_by_logger_or_global_nav {
+        if !event_consumed {
+            // General key handling for other views or modes
             match self.input_mode {
                 InputMode::Normal => {
                     match key_event.code {
@@ -216,17 +267,12 @@ impl App {
                             }
                         }
                         KeyCode::Tab => {
-                            let current_view = self.active_view;
-                            self.active_view = match current_view {
+                            self.active_view = match self.active_view {
                                 TuiView::VmList => TuiView::OllamaModelList,
                                 TuiView::OllamaModelList => TuiView::Chat,
                                 TuiView::Chat => TuiView::Logs,
-                                TuiView::Logs => TuiView::VmList, 
+                                TuiView::Logs => TuiView::VmList, // Should have been handled above
                             };
-                            // If we tabbed *away* from Logs, ensure its capture mode is off.
-                            if current_view == TuiView::Logs && self.active_view != TuiView::Logs {
-                                self.log_widget_state.transition_from_capture_key_input();
-                            }
                             self.vm_list_state.select(if self.vms.is_empty() { None } else { Some(0) });
                             #[cfg(feature = "ollama_integration")]
                             self.ollama_model_list_state.select(if self.ollama_models.is_empty() { None } else { Some(0) });
@@ -262,10 +308,6 @@ impl App {
                     }
                 }
                 InputMode::Editing => {
-                    // When in editing mode, ensure logger is not capturing (it shouldn't be anyway)
-                    if self.log_widget_state.is_capturing_key_input() {
-                        self.log_widget_state.transition_from_capture_key_input();
-                    }
                     match key_event.code {
                         KeyCode::Enter => {
                             if self.active_view == TuiView::Chat && self.active_chat.is_some() {
@@ -293,19 +335,11 @@ impl App {
                         KeyCode::Backspace => { self.current_input.pop(); }
                         KeyCode::Esc => {
                             self.input_mode = InputMode::Normal;
-                            // If we exit editing mode and are in Logs view, re-enable logger capture
-                            if self.active_view == TuiView::Logs {
-                                self.log_widget_state.transition_to_capture_key_input();
-                            }
                         }
                         _ => {}
                     }
                 }
             }
-        }
-        // Final check: if not in Logs view, logger should not be capturing.
-        if self.active_view != TuiView::Logs && self.log_widget_state.is_capturing_key_input() {
-             self.log_widget_state.transition_from_capture_key_input();
         }
     }
     
@@ -355,7 +389,6 @@ impl App {
     #[cfg(not(feature = "ollama_integration"))]
     fn select_previous_item_in_ollama_list(&mut self) { }
 
-
     pub fn on_tick(&mut self) {
     }
 }
@@ -401,22 +434,16 @@ fn run_app_loop(
 
     loop {
         terminal.draw(|f| ui(f, &mut app))?;
-
-        let timeout = tick_rate
-            .checked_sub(last_tick.elapsed())
-            .unwrap_or_else(|| Duration::from_secs(0));
-
+        let timeout = tick_rate.checked_sub(last_tick.elapsed()).unwrap_or_else(|| Duration::from_secs(0));
         if crossterm::event::poll(timeout)? {
             if let CrosstermEvent::Key(key_event) = event::read()? {
                 app.on_key(key_event);
             }
         }
-
         if last_tick.elapsed() >= tick_rate {
             app.on_tick();
             last_tick = Instant::now();
         }
-
         if app.should_quit {
             return Ok(());
         }
@@ -432,13 +459,6 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
             Constraint::Length(3),
         ].as_ref())
         .split(f.size());
-
-    let log_level_summary_widget = TuiLoggerLevelOutput::default()
-        .style_error(Style::default().fg(Color::Red))
-        .style_warn(Style::default().fg(Color::Yellow))
-        .style_info(Style::default().fg(Color::Cyan))
-        .style_debug(Style::default().fg(Color::Green))
-        .style_trace(Style::default().fg(Color::Magenta));
 
     let status_text_left = format!(
         "Hydravisor | View: {:?} | Input: {:?} | VMs: {} | Ollama: {}",
@@ -467,7 +487,6 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
         ])
         .split(status_bar_layout[1]);
 
-    f.render_widget(log_level_summary_widget, right_status_layout[0]);
     f.render_widget(Paragraph::new(status_text_right).alignment(Alignment::Right), right_status_layout[1]);
     
     let main_content_area = main_layout_chunks[1];
@@ -481,7 +500,6 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
                     Constraint::Percentage(60),
                 ].as_ref())
                 .split(main_content_area);
-
             let left_pane_title_str = match app.active_view {
                 TuiView::VmList => "VMs",
                 TuiView::OllamaModelList => "Ollama Models",
@@ -497,85 +515,58 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
                     let vm_items: Vec<ListItem> = app.vms.iter()
                         .map(|vm| ListItem::new(format!("{} ({}) - {:?}", vm.name, vm.instance_id, vm.state)))
                         .collect();
-                    let vm_list = List::new(vm_items)
-                        .highlight_style(Style::default().add_modifier(Modifier::BOLD).bg(Color::Gray))
-                        .highlight_symbol(">> ");
+                    let vm_list = List::new(vm_items).highlight_style(Style::default().add_modifier(Modifier::BOLD).bg(Color::Gray)).highlight_symbol(">> ");
                     f.render_stateful_widget(vm_list, left_pane_content_area, &mut app.vm_list_state);
                 }
                 TuiView::OllamaModelList => {
-                    #[cfg(feature = "ollama_integration")]
-                    {
-                        let model_items: Vec<ListItem> = app.ollama_models.iter()
-                            .map(|model| ListItem::new(model.name.clone())).collect();
-                        let model_list = List::new(model_items)
-                            .highlight_style(Style::default().add_modifier(Modifier::BOLD).bg(Color::Gray))
-                            .highlight_symbol(">> ");
+                    #[cfg(feature = "ollama_integration")] {
+                        let model_items: Vec<ListItem> = app.ollama_models.iter().map(|model| ListItem::new(model.name.clone())).collect();
+                        let model_list = List::new(model_items).highlight_style(Style::default().add_modifier(Modifier::BOLD).bg(Color::Gray)).highlight_symbol(">> ");
                         f.render_stateful_widget(model_list, left_pane_content_area, &mut app.ollama_model_list_state);
                     }
-                    #[cfg(not(feature = "ollama_integration"))]
-                    {
+                    #[cfg(not(feature = "ollama_integration"))] {
                         let placeholder_items: Vec<ListItem> = app.ollama_models.iter().map(|s| ListItem::new(s.as_str())).collect();
-                        let placeholder_list = List::new(placeholder_items);
-                        f.render_widget(placeholder_list, left_pane_content_area);
+                        f.render_widget(List::new(placeholder_items), left_pane_content_area);
                     }
                 }
                 TuiView::Chat => {
                     let chat_info_text = if let Some(chat_session) = &app.active_chat {
                         format!("Chatting with: {}\n(Details in right pane)", chat_session.model_name)
-                    } else {
-                        "No active chat. Select a model and press <Enter>.".to_string()
-                    };
+                    } else { "No active chat. Select model & <Enter>.".to_string() };
                     f.render_widget(Paragraph::new(Text::from(chat_info_text)), left_pane_content_area);
                 }
-                _ => {}
+                _ => {} 
             }
-
             let right_pane_title_line: Line = match app.active_view {
                 TuiView::VmList => Line::from("VM Details"),
                 TuiView::OllamaModelList => Line::from("Model Details"),
-                TuiView::Chat => match &app.active_chat {
-                    Some(chat) => Line::from(format!("Chat with {}", chat.model_name)),
-                    None => Line::from("Chat Area"),
-                },
+                TuiView::Chat => Line::from(if let Some(chat) = &app.active_chat { format!("Chat with {}", chat.model_name) } else { "Chat Area".to_string() }),
                 _ => Line::from("Details"),
             };
             let right_pane_block = Block::default().title(right_pane_title_line).borders(Borders::ALL);
             let right_pane_content_area = right_pane_block.inner(content_area_chunks[1]);
             f.render_widget(right_pane_block, content_area_chunks[1]);
-
             match app.active_view {
                 TuiView::VmList => {
                     if let Some(selected_idx) = app.vm_list_state.selected() {
                         if let Some(vm) = app.vms.get(selected_idx) {
-                            let details = format!(
-                                "Name: {}\nID: {}\nState: {:?}\nType: {:?}\nCPUs: {:?}\nMax Mem: {:?} KB\nUsed Mem: {:?} KB",
-                                vm.name, vm.instance_id, vm.state, vm.env_type,
-                                vm.cpu_cores_used, vm.memory_max_kb, vm.memory_used_kb
-                            );
+                            let details = format!("Name: {}\nID: {}\nState: {:?}\nType: {:?}\nCPUs: {:?}\nMax Mem: {:?} KB\nUsed Mem: {:?} KB",
+                                vm.name, vm.instance_id, vm.state, vm.env_type, vm.cpu_cores_used, vm.memory_max_kb, vm.memory_used_kb);
                             f.render_widget(Paragraph::new(Text::from(details)), right_pane_content_area);
                         }
-                    } else {
-                        f.render_widget(Paragraph::new("No VM selected"), right_pane_content_area);
-                    }
+                    } else { f.render_widget(Paragraph::new("No VM selected"), right_pane_content_area); }
                 }
                 TuiView::OllamaModelList => {
-                    #[cfg(feature = "ollama_integration")]
-                    if let Some(selected_idx) = app.ollama_model_list_state.selected() {
-                        if let Some(model) = app.ollama_models.get(selected_idx) {
-                            let details = format!(
-                                "Name: {}\nModified: {}\nSize: {}", 
-                                model.name, model.modified_at, model.size
-                            );
-                            f.render_widget(Paragraph::new(Text::from(details)), right_pane_content_area);
-                        } else {
-                             f.render_widget(Paragraph::new("No model selected or model data unavailable."), right_pane_content_area);
-                        }
-                    } else {
-                        f.render_widget(Paragraph::new("No model selected"), right_pane_content_area);
+                    #[cfg(feature = "ollama_integration")] {
+                        if let Some(selected_idx) = app.ollama_model_list_state.selected() {
+                            if let Some(model) = app.ollama_models.get(selected_idx) {
+                                let details = format!("Name: {}\nModified: {}\nSize: {}", model.name, model.modified_at, model.size);
+                                f.render_widget(Paragraph::new(Text::from(details)), right_pane_content_area);
+                            } else { f.render_widget(Paragraph::new("No model selected or data unavailable."), right_pane_content_area);}
+                        } else { f.render_widget(Paragraph::new("No model selected"), right_pane_content_area); }
                     }
-                    #[cfg(not(feature = "ollama_integration"))]
-                    {
-                         f.render_widget(Paragraph::new("Ollama integration disabled. No model details."), right_pane_content_area);
+                    #[cfg(not(feature = "ollama_integration"))] {
+                         f.render_widget(Paragraph::new("Ollama N/A. No model details."), right_pane_content_area);
                     }
                 }
                 TuiView::Chat => {
@@ -587,13 +578,10 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
                                 Span::raw(&msg.content),
                             ]))
                         }).collect();
-                        let chat_list = List::new(messages).block(Block::default().borders(Borders::NONE));
-                        f.render_widget(chat_list, right_pane_content_area);
-                    } else {
-                        f.render_widget(Paragraph::new("No active chat. Select a model from 'Ollama Models' view and press <Enter>."), right_pane_content_area);
-                    }
+                        f.render_widget(List::new(messages).block(Block::default().borders(Borders::NONE)), right_pane_content_area);
+                    } else { f.render_widget(Paragraph::new("No active chat. Select model first."), right_pane_content_area); }
                 }
-                _ => {}
+                _ => {} 
             }
         }
         TuiView::Logs => {
@@ -605,7 +593,6 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
                 .style_trace(Style::default().fg(Color::Magenta))
                 .output_separator(':')
                 .output_timestamp(Some("%H:%M:%S%.3N".to_string()))
-                .output_level(Some(TuiLoggerLevelEnum::Trace))
                 .output_target(true)
                 .output_file(true)
                 .output_line(true)
@@ -617,21 +604,11 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
     let input_block_title_string = if app.input_mode == InputMode::Editing {
         if app.active_chat.is_some() {
              format!("Input to {}: (Esc to nav, Enter to send)", app.active_chat.as_ref().unwrap().model_name)
-        } else {
-            "Input (Esc to nav, Enter to send)".to_string()
-        }
-    } else {
-        "Press 'i' to input, <Tab> to switch views, 'q' to quit".to_string()
-    };
+        } else { "Input (Esc to nav, Enter to send)".to_string() }
+    } else { "Press 'i' to input, <Tab> to switch views, 'q' to quit".to_string() };
     let title_line = Line::from(input_block_title_string);
-
-    let current_text_display_string = if app.input_mode == InputMode::Editing {
-        format!("{}{}", app.current_input, "_")
-    } else {
-        app.current_input.clone() 
-    };
+    let current_text_display_string = if app.input_mode == InputMode::Editing { format!("{}{}", app.current_input, "_") } else { app.current_input.clone() };
     let paragraph_text = Text::from(current_text_display_string);
-
     let input_area = Paragraph::new(paragraph_text)
         .style(match app.input_mode {
             InputMode::Normal => Style::default().fg(Color::DarkGray),

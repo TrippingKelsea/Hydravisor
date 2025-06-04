@@ -4,7 +4,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use tracing::{debug, info, warn};
 
 use crate::config::Config as AppConfig; // Renamed to avoid conflict with PolicyConfig
@@ -25,6 +24,10 @@ pub struct PolicyConfig {
     pub defaults: DefaultVmSettings,
     #[serde(default)]
     pub recording: SessionRecordingPolicy,
+    #[serde(default)]
+    pub default_network_access_policy: Option<bool>, // Added
+    #[serde(default)]
+    pub session_type_policies: HashMap<String, SessionTypePolicy>, // Added
     
     // Not part of the TOML file itself, but where it was loaded from
     #[serde(skip_serializing)]
@@ -198,6 +201,36 @@ pub struct AuthDecision {
     pub should_audit: bool,
 }
 
+// Added: Definition for PolicyDecision
+#[derive(Debug, Clone)]
+struct PolicyDecision {
+    allow: bool,
+    reason: String,
+}
+
+// Added: Definition for SessionTypePolicy (derived from usage)
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SessionTypePolicy {
+    #[serde(default)]
+    pub network_access: Option<Vec<NetworkRule>>,
+    #[serde(default)]
+    pub allow_all_network: Option<bool>,
+    // Add other session-type specific policies here, e.g., command filtering
+}
+
+// Added: Definition for NetworkRule (derived from usage)
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub struct NetworkRule {
+    // pub target_host: Option<String>, // Example: "example.com", "*.internal", "192.168.1.0/24"
+    // pub target_port: Option<u16>,    // Example: 80, 443
+    // pub protocol: Option<String>,    // Example: "tcp", "udp"
+    #[serde(default)]
+    pub allow: Option<bool>,         // True for allow, False for deny
+    // pub reason: Option<String>,      // Optional reason for this specific rule
+}
+
 impl PolicyEngine {
     pub fn load(app_config: &AppConfig) -> Result<Self> {
         let policy_path = match &app_config.policy_file_path {
@@ -248,43 +281,58 @@ impl PolicyEngine {
         //    - `CreateVm`/`CreateContainer`: Check `can_create`.
         //    - `AttachTerminal`: Check `can_attach_terminal`.
         //    - Other actions: Need more granular capabilities in `RoleDefinition` or a mapping from ActionType to specific booleans.
-        //      (This is where `policy.toml.md`'s "Role vs Command Matrix" comes in, needs formalizing in struct)
-        // 4. Consider VM-specific context (`request.vm_policy_context`):
-        //    - If `vm.trusted = false` in policy, it might impose stricter rules or deny certain agent roles.
-        //    - If `vm.agents` list exists, is the requesting agent_id in it?
-        //    - The precedence table from `policy.toml.md` / `agent-flow.design.md` for host vs agent policy needs to be applied.
-        // 5. Determine `should_audit` based on `role.audited` or `audit.log_denied` / `audit.log_approved_for_roles`.
-        // 6. Construct and return `AuthDecision`.
+        //    - Consider VM policy context (is_trusted_vm, allowed_agents_for_vm).
 
-        println!("Checking permission for request: {:?}", request);
-        println!("Using policy config: {:?}", self.config);
-
-        // Placeholder logic:
-        let effective_role_name = self.determine_effective_role_and_settings(request)?.0;
-        let (role_def, _overridden_settings) = self.get_role_definition_and_overrides(&effective_role_name, &request.agent_id)?;
-        
+        let (effective_role_name, effective_role_def) = self.determine_effective_role_and_settings(request)?;
         let mut allowed = false;
-        let mut reason = "Default deny".to_string();
+        let mut reason = format!("Action {:?} denied for role '{}' by default.", request.action, effective_role_name);
 
-        match request.action {
+        match &request.action {
             ActionType::CreateVm | ActionType::CreateContainer => {
-                allowed = role_def.can_create;
-                reason = if allowed { "Agent role allows creation".to_string() } else { "Agent role does not allow creation".to_string() };
+                allowed = effective_role_def.can_create;
+                if allowed {
+                    reason = format!("Action {:?} allowed for role '{}'.", request.action, effective_role_name);
+                } else {
+                    reason = format!("Action {:?} denied for role '{}': can_create is false.", request.action, effective_role_name);
+                }
             }
-            ActionType::AttachTerminal(_) => {
-                allowed = role_def.can_attach_terminal;
-                reason = if allowed { "Agent role allows terminal attach".to_string() } else { "Agent role does not allow terminal attach".to_string() };
+            ActionType::AttachTerminal(_) => { // The role within AttachTerminal might be used for further checks if needed
+                allowed = effective_role_def.can_attach_terminal;
+                if allowed {
+                    reason = format!("Action {:?} allowed for role '{}'.", request.action, effective_role_name);
+                } else {
+                    reason = format!("Action {:?} denied for role '{}': can_attach_terminal is false.", request.action, effective_role_name);
+                }
             }
-            _ => {
-                reason = "Action type not yet specifically handled by policy engine placeholder".to_string();
-                // allowed remains false
+            ActionType::ExecuteCommandInVm(command) => {
+                // This is where check_command_against_rules would be used if RoleDefinition had command rules.
+                // For now, assume false or some other logic.
+                // This line below refers to a fictional field in RoleDefinition. 
+                // It needs to be adapted once command rules are properly defined in RoleDefinition.
+                // (allowed, reason) = self.check_command_against_rules(command, &effective_role_def.allowed_commands.unwrap_or_default());
+                warn!("ExecuteCommandInVm policy check is not fully implemented. Denying command: {}", command);
+                allowed = false; // Default deny for now
+                reason = format!("Command execution ('{}') policy not fully implemented for role '{}', defaulting to deny.", command, effective_role_name);
+            }
+            ActionType::AccessMcpEndpoint(endpoint) => {
+                // TODO: Implement MCP endpoint policies. For now, deny.
+                warn!("AccessMcpEndpoint ('{}') policy check is not implemented. Denying.", endpoint);
+                allowed = false;
+                reason = format!("MCP endpoint access ('{}') policy not implemented for role '{}', defaulting to deny.", endpoint, effective_role_name);
+            }
+            ActionType::ViewModelLogs | ActionType::DeleteVm | ActionType::DeleteContainer | ActionType::Generic(_) => {
+                // TODO: Define policies for these actions. For now, using a default based on a generic permission or deny.
+                // This is a placeholder. A more specific permission should be checked.
+                // For example, a `can_manage_own_resources` or similar.
+                // For now, let's assume these are generally disallowed unless role is very permissive (which we don't model yet).
+                allowed = false; // Default deny for these less common/more sensitive actions for now
+                reason = format!("Action {:?} is not yet specifically governed by policy for role '{}', defaulting to deny.", request.action, effective_role_name);
             }
         }
         
-        // TODO: Implement VM policy context checks and precedence (agent-flow.design.md matrix)
-        // This is a very simplified check and needs to incorporate the host-side policy for the VM.
-
-        let should_audit = role_def.audited || (!allowed && self.config.audit.log_denied) || (allowed && self.config.audit.log_approved_for_roles.contains(&effective_role_name));
+        let should_audit = self.config.audit.log_denied && !allowed || 
+                           self.config.audit.log_approved_for_roles.contains(&effective_role_name) && allowed ||
+                           effective_role_def.audited; // if the role itself is marked as audited
 
         Ok(AuthDecision {
             allowed,
@@ -294,7 +342,7 @@ impl PolicyEngine {
         })
     }
 
-    // Helper to get the actual RoleDefinition and any specific agent overrides
+    // Helper to get RoleDefinition and any agent-specific overrides
     fn get_role_definition_and_overrides(&self, role_name: &str, agent_id: &str) -> Result<(&RoleDefinition, Option<OverrideSettings>)> {
         let agent_permission_key = format!("agent::{}", agent_id);
         let agent_override = self.config.permissions.get(&agent_permission_key);
@@ -356,6 +404,57 @@ impl PolicyEngine {
 
     // TODO: Add a `validate_policy_config(config: &PolicyConfig) -> Result<()>` function for use by CLI `policy validate`.
     // This would check for internal consistency (e.g., roles in overrides exist).
+
+    fn evaluate_network_policy(&self, session_type: &str, _target_host: &str, _target_port: u16) -> (bool, String) {
+        let default_policy = PolicyDecision {
+            allow: self.config.default_network_access_policy.unwrap_or(false),
+            reason: "Default network policy".to_string(),
+        };
+
+        if let Some(session_policy) = self.config.session_type_policies.get(session_type) {
+            if let Some(network_rules) = &session_policy.network_access {
+                // TODO: Implement detailed rule matching (host, port, protocol)
+                // For now, if any network_rules exist, use the first one's allow status if available, or deny.
+                // This is a simplification.
+                if !network_rules.is_empty() {
+                    // Simplified: just using the general allow_all/deny_all if present or first rule's implication
+                    // A real implementation would iterate and match specific rules.
+                    let allow = network_rules.first().map_or(default_policy.allow, |rule| rule.allow.unwrap_or(default_policy.allow) );
+                    let reason = if allow {
+                        format!("Network access explicitly allowed by session type '{}' policy (simplified check).", session_type)
+                    } else {
+                        format!("Network access explicitly denied by session type '{}' policy (simplified check).", session_type)
+                    };
+                    return (allow, reason);
+                }
+            }
+            // If no specific network rules for the session type, but a general allow_all_network for session type exists
+            if let Some(allow_all) = session_policy.allow_all_network {
+                return (
+                    allow_all, 
+                    if allow_all {
+                        format!("All network access explicitly allowed for session type '{}'.", session_type)
+                    } else {
+                        format!("All network access explicitly denied for session type '{}'.", session_type)
+                    }
+                );
+            }
+        }
+        (default_policy.allow, default_policy.reason)
+    }
+
+    // Example of how a more detailed check might look (not currently used by evaluate_request)
+    #[allow(dead_code)]
+    fn check_command_against_rules(&self, command: &str, rules: &Vec<String>) -> (bool, String) {
+        // Simplified: check if the command is exactly in the list of allowed command strings.
+        // A real implementation would use regex or glob patterns from CommandRule structs.
+        // let mut reason = "Default deny".to_string(); // This variable is assigned but its value is never read.
+        if rules.contains(&command.to_string()) {
+            (true, format!("Command '{}' explicitly allowed by rule.", command))
+        } else {
+            (false, format!("Command '{}' not allowed by any rule.", command))
+        }
+    }
 }
 
 // TODO: Add tests for PolicyEngine:

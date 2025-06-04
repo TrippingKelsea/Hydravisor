@@ -12,7 +12,7 @@ use crate::env_manager::{EnvironmentConfig, EnvironmentManager, EnvironmentStatu
 use crate::policy::PolicyEngine;
 use crate::ssh_manager::SshManager;
 use crate::audit_engine::AuditEngine;
-use crate::errors::HydraError;
+// use crate::errors::HydraError; // Commented out as it's unused
 
 // Represents an active Hydravisor session (agent workspace)
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -156,14 +156,14 @@ impl SessionManager {
         let env_status_from_creation = self.env_manager.create_environment(&env_conf)?; // Assuming this returns EnvironmentStatus
 
         // Corrected placeholder_env_status initialization
-        let placeholder_env_status = EnvironmentStatus {
+        let _placeholder_env_status = EnvironmentStatus {
             instance_id: env_conf.instance_id.clone(),
             name: format!("env-{}", env_conf.instance_id.chars().take(8).collect::<String>()), // Example name
             env_type: env_conf.env_type.clone(),
             state: env_status_from_creation.state, // Use state from actual env creation
             ip_address: env_status_from_creation.ip_address,
             ssh_port: env_status_from_creation.ssh_port,
-            base_image: Some(env_conf.base_image.clone()), // Corrected: Option<String>
+            base_image: Some(env_conf.base_image.clone()),
             // cpu_usage_percent, memory_usage_mb, disk_usage_gb are removed
             // using ..Default::default() for other fields like cpu_cores_used, memory_max_kb etc.
             ..Default::default()
@@ -188,7 +188,7 @@ impl SessionManager {
 
         // Ok(CreateSessionResponse {
         //     session,
-        //     environment_status: placeholder_env_status, // Use the corrected one
+        //     environment_status: _placeholder_env_status, // Use the corrected one
         //     ssh_details: None, // Populate if SSH is set up
         // })
     }
