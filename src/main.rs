@@ -74,8 +74,10 @@ async fn main() -> Result<()> {
         tui_logger::set_default_level(tui_max_log_level); // This sets the *display* filter for the TUI widget
         // Explicitly set the level for the main application target
         tui_logger::set_level_for_target(APP_NAME, tui_max_log_level); 
-        // Optionally, set for other crates if their logs are desired in TUI and noisy, e.g.:
-        // tui_logger::set_level_for_target("hyper", log::LevelFilter::Warn);
+
+        // Test log via log facade *before* tracing init, to see if tui-logger picks it up directly.
+        // The target for `log::info!` is implicitly the current module path (e.g., "hydravisor" for main.rs).
+        log::info!("TUI mode: Test log for tui-logger via 'log' facade from main.rs (target should be hydravisor).");
 
         // File logging layer
         let file_appender = rolling::daily(&log_path, format!("{}.log", APP_NAME));
@@ -93,8 +95,15 @@ async fn main() -> Result<()> {
         subscriber_registry
             .with(file_layer) 
             .with(tui_layer)  // Add TUI layer
-            .init();
+            .init(); // Initialize the global subscriber
 
+        // Test logs immediately after subscriber initialization
+        info!(target: APP_NAME, "TUI mode. Test log INFO from main.rs");
+        warn!(target: APP_NAME, "TUI mode. Test log WARN from main.rs");
+        // Debug log will only appear if log level is set to debug or trace
+        debug!(target: APP_NAME, "TUI mode. Test log DEBUG from main.rs"); 
+
+        // Original info log about TUI mode and log file path
         info!("TUI mode detected. Logging to file and TUI. Log file: {:?}", log_path.join(format!("{}.log", APP_NAME)));
     } else {
         // Standard FmtSubscriber for console output

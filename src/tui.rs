@@ -8,10 +8,8 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect, Alignment},
-    style::{Color, Modifier, Style},
-    text::{Line, Text, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    layout::{Constraint, Direction, Layout, Rect},
+    widgets::ListState,
     Terminal,
 };
 use std::{io::{self, Stdout}, sync::Arc, time::{Duration, Instant}};
@@ -33,8 +31,16 @@ use futures::executor::block_on;
 use tokio::runtime::Handle;
 
 // tui-logger imports
-use tui_logger::{TuiLoggerSmartWidget, TuiWidgetState, TuiWidgetEvent};
+use tui_logger::{TuiWidgetState, TuiWidgetEvent};
 // No separate import for tui_logger::Input; will use full path.
+
+pub mod widgets; // Added widgets submodule declaration
+use self::widgets::status_bar::StatusBarWidget; // Use the new widget
+use self::widgets::input_bar::InputBarWidget;   // Use the new widget
+use self::widgets::vm_list::VmListWidget;
+use self::widgets::ollama_model_list::OllamaModelListWidget;
+use self::widgets::chat::ChatWidget;
+use self::widgets::logs::LogsWidget;
 
 // Define different views for the TUI
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,7 +112,7 @@ impl App {
         ollama_manager: Arc<OllamaManager>,
     ) -> Self {
         let log_widget_state = TuiWidgetState::new();
-
+        
         let mut app = Self {
             should_quit: false,
             ollama_models: Vec::new(),
@@ -454,168 +460,32 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
     let main_layout_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
-            Constraint::Min(0),
-            Constraint::Length(3),
+            Constraint::Length(1), // For Status Bar
+            Constraint::Min(0),    // For Main Content Area
+            Constraint::Length(3), // For Input Bar
         ].as_ref())
         .split(f.size());
 
-    let status_text_left = format!(
-        "Hydravisor | View: {:?} | Input: {:?} | VMs: {} | Ollama: {}",
-        app.active_view,
-        app.input_mode,
-        app.vms.len(),
-        if cfg!(feature = "ollama_integration") { app.ollama_models.len().to_string() } else { "N/A".to_string() },
-    );
-    let status_text_right = Local::now().format("%H:%M:%S").to_string();
-    
-    let status_bar_layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(70),
-            Constraint::Percentage(30),
-        ])
-        .split(main_layout_chunks[0]);
-
-    f.render_widget(Paragraph::new(status_text_left), status_bar_layout[0]);
-
-    let right_status_layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Min(0),
-            Constraint::Length(8 + 2),
-        ])
-        .split(status_bar_layout[1]);
-
-    f.render_widget(Paragraph::new(status_text_right).alignment(Alignment::Right), right_status_layout[1]);
+    StatusBarWidget::render(f, app, main_layout_chunks[0]);
     
     let main_content_area = main_layout_chunks[1];
 
     match app.active_view {
-        TuiView::VmList | TuiView::OllamaModelList | TuiView::Chat => {
-            let content_area_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(40),
-                    Constraint::Percentage(60),
-                ].as_ref())
-                .split(main_content_area);
-            let left_pane_title_str = match app.active_view {
-                TuiView::VmList => "VMs",
-                TuiView::OllamaModelList => "Ollama Models",
-                TuiView::Chat => "Chat Info",
-                TuiView::Logs => "ThisShouldNotHappenInLogsViewBranch", 
-            };
-            let left_pane_block = Block::default().title(left_pane_title_str).borders(Borders::ALL);
-            let left_pane_content_area = left_pane_block.inner(content_area_chunks[0]);
-            f.render_widget(left_pane_block, content_area_chunks[0]);
-
-            match app.active_view {
-                TuiView::VmList => {
-                    let vm_items: Vec<ListItem> = app.vms.iter()
-                        .map(|vm| ListItem::new(format!("{} ({}) - {:?}", vm.name, vm.instance_id, vm.state)))
-                        .collect();
-                    let vm_list = List::new(vm_items).highlight_style(Style::default().add_modifier(Modifier::BOLD).bg(Color::Gray)).highlight_symbol(">> ");
-                    f.render_stateful_widget(vm_list, left_pane_content_area, &mut app.vm_list_state);
-                }
-                TuiView::OllamaModelList => {
-                    #[cfg(feature = "ollama_integration")] {
-                        let model_items: Vec<ListItem> = app.ollama_models.iter().map(|model| ListItem::new(model.name.clone())).collect();
-                        let model_list = List::new(model_items).highlight_style(Style::default().add_modifier(Modifier::BOLD).bg(Color::Gray)).highlight_symbol(">> ");
-                        f.render_stateful_widget(model_list, left_pane_content_area, &mut app.ollama_model_list_state);
-                    }
-                    #[cfg(not(feature = "ollama_integration"))] {
-                        let placeholder_items: Vec<ListItem> = app.ollama_models.iter().map(|s| ListItem::new(s.as_str())).collect();
-                        f.render_widget(List::new(placeholder_items), left_pane_content_area);
-                    }
-                }
-                TuiView::Chat => {
-                    let chat_info_text = if let Some(chat_session) = &app.active_chat {
-                        format!("Chatting with: {}\n(Details in right pane)", chat_session.model_name)
-                    } else { "No active chat. Select model & <Enter>.".to_string() };
-                    f.render_widget(Paragraph::new(Text::from(chat_info_text)), left_pane_content_area);
-                }
-                _ => {} 
-            }
-            let right_pane_title_line: Line = match app.active_view {
-                TuiView::VmList => Line::from("VM Details"),
-                TuiView::OllamaModelList => Line::from("Model Details"),
-                TuiView::Chat => Line::from(if let Some(chat) = &app.active_chat { format!("Chat with {}", chat.model_name) } else { "Chat Area".to_string() }),
-                _ => Line::from("Details"),
-            };
-            let right_pane_block = Block::default().title(right_pane_title_line).borders(Borders::ALL);
-            let right_pane_content_area = right_pane_block.inner(content_area_chunks[1]);
-            f.render_widget(right_pane_block, content_area_chunks[1]);
-            match app.active_view {
-                TuiView::VmList => {
-                    if let Some(selected_idx) = app.vm_list_state.selected() {
-                        if let Some(vm) = app.vms.get(selected_idx) {
-                            let details = format!("Name: {}\nID: {}\nState: {:?}\nType: {:?}\nCPUs: {:?}\nMax Mem: {:?} KB\nUsed Mem: {:?} KB",
-                                vm.name, vm.instance_id, vm.state, vm.env_type, vm.cpu_cores_used, vm.memory_max_kb, vm.memory_used_kb);
-                            f.render_widget(Paragraph::new(Text::from(details)), right_pane_content_area);
-                        }
-                    } else { f.render_widget(Paragraph::new("No VM selected"), right_pane_content_area); }
-                }
-                TuiView::OllamaModelList => {
-                    #[cfg(feature = "ollama_integration")] {
-                        if let Some(selected_idx) = app.ollama_model_list_state.selected() {
-                            if let Some(model) = app.ollama_models.get(selected_idx) {
-                                let details = format!("Name: {}\nModified: {}\nSize: {}", model.name, model.modified_at, model.size);
-                                f.render_widget(Paragraph::new(Text::from(details)), right_pane_content_area);
-                            } else { f.render_widget(Paragraph::new("No model selected or data unavailable."), right_pane_content_area);}
-                        } else { f.render_widget(Paragraph::new("No model selected"), right_pane_content_area); }
-                    }
-                    #[cfg(not(feature = "ollama_integration"))] {
-                         f.render_widget(Paragraph::new("Ollama N/A. No model details."), right_pane_content_area);
-                    }
-                }
-                TuiView::Chat => {
-                    if let Some(chat_session) = &app.active_chat {
-                        let messages: Vec<ListItem> = chat_session.messages.iter().map(|msg| {
-                            ListItem::new(Line::from(vec![
-                                Span::styled(format!("[{}] ", msg.timestamp), Style::default().fg(Color::DarkGray)),
-                                Span::styled(format!("{}: ", msg.sender), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                                Span::raw(&msg.content),
-                            ]))
-                        }).collect();
-                        f.render_widget(List::new(messages).block(Block::default().borders(Borders::NONE)), right_pane_content_area);
-                    } else { f.render_widget(Paragraph::new("No active chat. Select model first."), right_pane_content_area); }
-                }
-                _ => {} 
-            }
+        TuiView::VmList => {
+            VmListWidget::render(f, app, main_content_area);
+        }
+        TuiView::OllamaModelList => {
+            OllamaModelListWidget::render(f, app, main_content_area);
+        }
+        TuiView::Chat => {
+            ChatWidget::render(f, app, main_content_area);
         }
         TuiView::Logs => {
-            let log_widget = TuiLoggerSmartWidget::default()
-                .style_error(Style::default().fg(Color::Red))
-                .style_warn(Style::default().fg(Color::Yellow))
-                .style_info(Style::default().fg(Color::Cyan))
-                .style_debug(Style::default().fg(Color::Green))
-                .style_trace(Style::default().fg(Color::Magenta))
-                .output_separator(':')
-                .output_timestamp(Some("%H:%M:%S%.3N".to_string()))
-                .output_target(true)
-                .output_file(true)
-                .output_line(true)
-                .state(&app.log_widget_state);
-            f.render_widget(log_widget, main_content_area);
+            LogsWidget::render(f, app, main_content_area);
         }
     }
-    
-    let input_block_title_string = if app.input_mode == InputMode::Editing {
-        if app.active_chat.is_some() {
-             format!("Input to {}: (Esc to nav, Enter to send)", app.active_chat.as_ref().unwrap().model_name)
-        } else { "Input (Esc to nav, Enter to send)".to_string() }
-    } else { "Press 'i' to input, <Tab> to switch views, 'q' to quit".to_string() };
-    let title_line = Line::from(input_block_title_string);
-    let current_text_display_string = if app.input_mode == InputMode::Editing { format!("{}{}", app.current_input, "_") } else { app.current_input.clone() };
-    let paragraph_text = Text::from(current_text_display_string);
-    let input_area = Paragraph::new(paragraph_text)
-        .style(match app.input_mode {
-            InputMode::Normal => Style::default().fg(Color::DarkGray),
-            InputMode::Editing => Style::default().fg(Color::Yellow),
-        })
-        .block(Block::default().borders(Borders::ALL).title(title_line));
-    f.render_widget(input_area, main_layout_chunks[2]);
+
+    InputBarWidget::render(f, app, main_layout_chunks[2]);
 }
 
 #[allow(dead_code)]
