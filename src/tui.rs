@@ -2,19 +2,19 @@
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEvent},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect, Alignment},
     style::{Color, Modifier, Style},
     text::{Line, Text, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Terminal,
 };
-use std::{io::{self, Stdout}, sync::Arc, time::{Duration, Instant}};
+use std::{io::{self, Stdout}, sync::Arc, time::{Duration, Instant}, str::FromStr};
 use chrono::Local;
 
 use crate::config::Config;
@@ -33,7 +33,7 @@ use futures::executor::block_on;
 use tokio::runtime::Handle;
 
 // tui-logger imports
-use tui_logger::{TuiLoggerWidget, TuiLoggerLevelOutput, TuiLoggerSmartWidget, TuiWidgetState, Level as TuiLogLevel};
+use tui_logger::{TuiLoggerSmartWidget, TuiLoggerLevelOutput, TuiWidgetState, Level as TuiLoggerLevelEnum}; // Use a distinct alias
 
 // Define different views for the TUI
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,7 +105,12 @@ impl App {
         ollama_manager: Arc<OllamaManager>,
     ) -> Self {
         let mut log_widget_state = TuiWidgetState::new();
-        log_widget_state.set_default_level_filter(TuiLogLevel::Info);
+        // Configure TuiWidgetState to filter messages. This uses log::LevelFilter.
+        // The log level from CLI args (parsed in main.rs and used for tui_logger::init_logger)
+        // will act as the MAX level for tui-logger to capture.
+        // Here, we can set a LESS STRICT filter for the widget itself initially, if desired,
+        // or align it. For now, let's default to showing Info and above in the widget.
+        log_widget_state.set_default_level_filter(log::LevelFilter::Info);
 
         let mut app = Self {
             should_quit: false,
@@ -180,13 +185,14 @@ impl App {
         }
     }
 
-    pub fn on_key(&mut self, key_event: crossterm::event::KeyEvent) {
-        let mut logger_knows_it_is_active = false;
+    pub fn on_key(&mut self, key_event: KeyEvent) {
+        let mut key_handled_by_logger_or_global_nav = false;
 
         if self.active_view == TuiView::Logs && self.input_mode == InputMode::Normal {
-            self.log_widget_state.transition_to_capture_key_input();
-            logger_knows_it_is_active = true;
+            self.log_widget_state.transition_to_capture_key_input(); 
             self.log_widget_state.handle_key_event(key_event);
+            key_handled_by_logger_or_global_nav = true; // Assume logger tried or will handle it.
+            
             match key_event.code {
                 KeyCode::Char('q') => self.should_quit = true,
                 KeyCode::Tab => {
@@ -195,9 +201,11 @@ impl App {
                     #[cfg(feature = "ollama_integration")]
                     self.ollama_model_list_state.select(if self.ollama_models.is_empty() { None } else { Some(0) });
                 }
-                _ => {}
+                _ => { }
             }
-        } else {
+        }
+
+        if !key_handled_by_logger_or_global_nav {
             match self.input_mode {
                 InputMode::Normal => {
                     match key_event.code {
@@ -208,12 +216,17 @@ impl App {
                             }
                         }
                         KeyCode::Tab => {
-                            self.active_view = match self.active_view {
+                            let current_view = self.active_view;
+                            self.active_view = match current_view {
                                 TuiView::VmList => TuiView::OllamaModelList,
                                 TuiView::OllamaModelList => TuiView::Chat,
                                 TuiView::Chat => TuiView::Logs,
-                                TuiView::Logs => TuiView::VmList,
+                                TuiView::Logs => TuiView::VmList, 
                             };
+                            // If we tabbed *away* from Logs, ensure its capture mode is off.
+                            if current_view == TuiView::Logs && self.active_view != TuiView::Logs {
+                                self.log_widget_state.transition_from_capture_key_input();
+                            }
                             self.vm_list_state.select(if self.vms.is_empty() { None } else { Some(0) });
                             #[cfg(feature = "ollama_integration")]
                             self.ollama_model_list_state.select(if self.ollama_models.is_empty() { None } else { Some(0) });
@@ -221,12 +234,12 @@ impl App {
                         KeyCode::Down => match self.active_view {
                             TuiView::VmList => self.select_next_item_in_vm_list(),
                             TuiView::OllamaModelList => self.select_next_item_in_ollama_list(),
-                            _ => {}
+                            _ => {} 
                         },
                         KeyCode::Up => match self.active_view {
                             TuiView::VmList => self.select_previous_item_in_vm_list(),
                             TuiView::OllamaModelList => self.select_previous_item_in_ollama_list(),
-                            _ => {}
+                            _ => {} 
                         },
                         KeyCode::Enter => {
                             if self.active_view == TuiView::OllamaModelList {
@@ -249,6 +262,10 @@ impl App {
                     }
                 }
                 InputMode::Editing => {
+                    // When in editing mode, ensure logger is not capturing (it shouldn't be anyway)
+                    if self.log_widget_state.is_capturing_key_input() {
+                        self.log_widget_state.transition_from_capture_key_input();
+                    }
                     match key_event.code {
                         KeyCode::Enter => {
                             if self.active_view == TuiView::Chat && self.active_chat.is_some() {
@@ -274,14 +291,20 @@ impl App {
                         }
                         KeyCode::Char(c) => self.current_input.push(c),
                         KeyCode::Backspace => { self.current_input.pop(); }
-                        KeyCode::Esc => self.input_mode = InputMode::Normal,
+                        KeyCode::Esc => {
+                            self.input_mode = InputMode::Normal;
+                            // If we exit editing mode and are in Logs view, re-enable logger capture
+                            if self.active_view == TuiView::Logs {
+                                self.log_widget_state.transition_to_capture_key_input();
+                            }
+                        }
                         _ => {}
                     }
                 }
             }
         }
-
-        if !logger_knows_it_is_active && self.log_widget_state.is_capturing_key_input() {
+        // Final check: if not in Logs view, logger should not be capturing.
+        if self.active_view != TuiView::Logs && self.log_widget_state.is_capturing_key_input() {
              self.log_widget_state.transition_from_capture_key_input();
         }
     }
@@ -410,7 +433,7 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
         ].as_ref())
         .split(f.size());
 
-    let log_level_summary = TuiLoggerLevelOutput::default()
+    let log_level_summary_widget = TuiLoggerLevelOutput::default()
         .style_error(Style::default().fg(Color::Red))
         .style_warn(Style::default().fg(Color::Yellow))
         .style_info(Style::default().fg(Color::Cyan))
@@ -418,11 +441,11 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
         .style_trace(Style::default().fg(Color::Magenta));
 
     let status_text_left = format!(
-        "Hydravisor | View: {:?} | Input: {:?} | Quit: 'q' | VMs: {} | Ollama Models: {}",
+        "Hydravisor | View: {:?} | Input: {:?} | VMs: {} | Ollama: {}",
         app.active_view,
         app.input_mode,
         app.vms.len(),
-        app.ollama_models.len(),
+        if cfg!(feature = "ollama_integration") { app.ollama_models.len().to_string() } else { "N/A".to_string() },
     );
     let status_text_right = Local::now().format("%H:%M:%S").to_string();
     
@@ -444,8 +467,8 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
         ])
         .split(status_bar_layout[1]);
 
-    f.render_widget(log_level_summary, right_status_layout[0]);
-    f.render_widget(Paragraph::new(status_text_right).alignment(ratatui::layout::Alignment::Right), right_status_layout[1]);
+    f.render_widget(log_level_summary_widget, right_status_layout[0]);
+    f.render_widget(Paragraph::new(status_text_right).alignment(Alignment::Right), right_status_layout[1]);
     
     let main_content_area = main_layout_chunks[1];
 
@@ -462,8 +485,8 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
             let left_pane_title_str = match app.active_view {
                 TuiView::VmList => "VMs",
                 TuiView::OllamaModelList => "Ollama Models",
-                TuiView::Chat => "Chat Info / Controls",
-                TuiView::Logs => "Hydravisor Logs",
+                TuiView::Chat => "Chat Info",
+                TuiView::Logs => "ThisShouldNotHappenInLogsViewBranch", 
             };
             let left_pane_block = Block::default().title(left_pane_title_str).borders(Borders::ALL);
             let left_pane_content_area = left_pane_block.inner(content_area_chunks[0]);
@@ -582,7 +605,7 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
                 .style_trace(Style::default().fg(Color::Magenta))
                 .output_separator(':')
                 .output_timestamp(Some("%H:%M:%S%.3N".to_string()))
-                .output_level(Some(TuiLogLevel::Trace))
+                .output_level(Some(TuiLoggerLevelEnum::Trace))
                 .output_target(true)
                 .output_file(true)
                 .output_line(true)
@@ -598,7 +621,7 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
             "Input (Esc to nav, Enter to send)".to_string()
         }
     } else {
-        "Press 'i' to input, <Tab> to switch views".to_string()
+        "Press 'i' to input, <Tab> to switch views, 'q' to quit".to_string()
     };
     let title_line = Line::from(input_block_title_string);
 
