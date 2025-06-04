@@ -1,7 +1,5 @@
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::Color, // Removed Style as it's not directly used, Color might be for future styling
-    text::Line,   // Line is not directly used but good for consistency if title were a Line
     widgets::Paragraph,
     Frame,
 };

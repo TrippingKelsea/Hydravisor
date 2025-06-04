@@ -18,7 +18,6 @@ use anyhow::Result;
 use clap::Parser;
 use std::sync::Arc;
 use std::fs::create_dir_all; // For creating log directory
-use std::str::FromStr; // RE-ADDED THIS LINE
 
 use cli::Cli;
 use config::{Config, APP_NAME}; // Import APP_NAME
@@ -41,8 +40,10 @@ use tracing_appender::non_blocking::WorkerGuard; // Specific import for WorkerGu
 use tracing_appender::rolling; // For file logging
 use xdg::BaseDirectories; // For log path
 
-// tui-logger specific imports
-use tui_logger::TuiTracingSubscriberLayer; // Corrected import to TuiTracingSubscriberLayer
+// Import for the custom TUI tracing layer and its message type
+use crate::tui::tracing_layer::TuiLogCollectorLayer;
+use crate::tui::UILogEntry; // For the channel type
+use tokio::sync::mpsc; // For the channel
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -67,17 +68,12 @@ async fn main() -> Result<()> {
     let mut _file_worker_guard: Option<WorkerGuard> = None;
 
     let subscriber_registry = Registry::default().with(env_filter);
+    let tui_log_rx; // Declare receiver here to be passed to App later
 
     if tui_mode {
-        // Map our LogLevelCli to tui_logger's understanding of level
-        let tui_max_log_level = log::LevelFilter::from_str(&log_level_str).unwrap_or(log::LevelFilter::Info);
-        tui_logger::set_default_level(tui_max_log_level); // This sets the *display* filter for the TUI widget
-        // Explicitly set the level for the main application target
-        tui_logger::set_level_for_target(APP_NAME, tui_max_log_level); 
-
-        // Test log via log facade *before* tracing init, to see if tui-logger picks it up directly.
-        // The target for `log::info!` is implicitly the current module path (e.g., "hydravisor" for main.rs).
-        log::info!("TUI mode: Test log for tui-logger via 'log' facade from main.rs (target should be hydravisor).");
+        // Create channel for sending logs to TUI
+        let (tx, rx) = mpsc::unbounded_channel::<UILogEntry>();
+        tui_log_rx = Some(rx); // Store receiver for TUI
 
         // File logging layer
         let file_appender = rolling::daily(&log_path, format!("{}.log", APP_NAME));
@@ -89,24 +85,22 @@ async fn main() -> Result<()> {
             .with_ansi(false) // No ANSI colors in file logs
             .json(); // Use JSON format for file logs (requires 'json' feature on tracing-subscriber)
 
-        // TUI logging layer
-        let tui_layer = TuiTracingSubscriberLayer; // Corrected: Instantiate as a unit struct
+        // Custom TUI log collector layer
+        let tui_collector_layer = TuiLogCollectorLayer::new(tx);
 
         subscriber_registry
-            .with(file_layer) 
-            .with(tui_layer)  // Add TUI layer
+            .with(file_layer)
+            .with(tui_collector_layer) // Add our custom TUI layer
             .init(); // Initialize the global subscriber
 
         // Test logs immediately after subscriber initialization
-        info!(target: APP_NAME, "TUI mode. Test log INFO from main.rs");
-        warn!(target: APP_NAME, "TUI mode. Test log WARN from main.rs");
-        // Debug log will only appear if log level is set to debug or trace
-        debug!(target: APP_NAME, "TUI mode. Test log DEBUG from main.rs"); 
+        // ... existing code ...
 
         // Original info log about TUI mode and log file path
         info!("TUI mode detected. Logging to file and TUI. Log file: {:?}", log_path.join(format!("{}.log", APP_NAME)));
     } else {
         // Standard FmtSubscriber for console output
+        tui_log_rx = None; // No receiver in non-TUI mode
         let console_layer = fmt::layer()
             .with_writer(std::io::stderr) // Log to stderr for CLI
             .with_target(true) // Show module paths
@@ -232,6 +226,7 @@ async fn main() -> Result<()> {
             Arc::clone(&env_manager),
             Arc::clone(&audit_engine),
             Arc::clone(&ollama_manager),
+            tui_log_rx.expect("Log receiver should exist in TUI mode"), // Pass receiver
         )?; // run_tui is not async
     } else {
         info!("No subcommand provided and running in headless mode. Exiting.");

@@ -26,7 +26,6 @@ jsonschema = "0.17.1"
 virt = { version = "0.4.2", optional = true }
 ollama-rs = { version = "0.1.9", optional = true, features = ["stream"] }
 futures = "0.3" # For block_on
-tui-logger = { version = "0.10.0", features = ["tracing-support"] } # For TUI logging widget, added tracing-support
 log = "0.4" # For log::LevelFilter used by tui-logger
 
 # Placeholder for potential future dependencies from design docs

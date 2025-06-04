@@ -14,6 +14,8 @@ use ratatui::{
 };
 use std::{io::{self, Stdout}, sync::Arc, time::{Duration, Instant}};
 use chrono::Local;
+use tracing::Level;
+use tokio::sync::mpsc;
 
 use crate::config::Config;
 use crate::session_manager::SessionManager;
@@ -30,11 +32,8 @@ use futures::executor::block_on;
 #[cfg(feature = "ollama_integration")]
 use tokio::runtime::Handle;
 
-// tui-logger imports
-use tui_logger::{TuiWidgetState, TuiWidgetEvent};
-// No separate import for tui_logger::Input; will use full path.
-
 pub mod widgets; // Added widgets submodule declaration
+pub mod tracing_layer; // Add this line
 use self::widgets::status_bar::StatusBarWidget; // Use the new widget
 use self::widgets::input_bar::InputBarWidget;   // Use the new widget
 use self::widgets::vm_list::VmListWidget;
@@ -74,6 +73,16 @@ pub struct ChatSession {
     pub is_streaming: bool,
 }
 
+// New struct for TUI log entries
+#[derive(Clone, Debug)]
+pub struct UILogEntry {
+    pub timestamp: String, // Using String for simplicity, formatted in the tracing layer
+    pub level: Level,
+    pub target: String,
+    pub message: String,
+    // Consider adding: pub file: Option<String>, pub line: Option<u32>,
+}
+
 pub struct App {
     should_quit: bool,
     
@@ -99,7 +108,9 @@ pub struct App {
     input_mode: InputMode,
     current_input: String,
     active_chat: Option<ChatSession>,
-    log_widget_state: TuiWidgetState,
+    log_entries: Vec<UILogEntry>,
+    log_list_state: ListState,
+    log_receiver: Option<mpsc::UnboundedReceiver<UILogEntry>>,
 }
 
 impl App {
@@ -110,9 +121,8 @@ impl App {
         env_manager: Arc<EnvironmentManager>,
         audit_engine: Arc<AuditEngine>,
         ollama_manager: Arc<OllamaManager>,
+        log_receiver: mpsc::UnboundedReceiver<UILogEntry>,
     ) -> Self {
-        let log_widget_state = TuiWidgetState::new();
-        
         let mut app = Self {
             should_quit: false,
             ollama_models: Vec::new(),
@@ -130,7 +140,9 @@ impl App {
             input_mode: InputMode::Normal,
             current_input: String::new(),
             active_chat: None,
-            log_widget_state,
+            log_entries: Vec::new(),
+            log_list_state: ListState::default(),
+            log_receiver: Some(log_receiver),
         };
 
         #[cfg(feature = "ollama_integration")]
@@ -188,79 +200,71 @@ impl App {
         let mut event_consumed = false;
 
         if self.active_view == TuiView::Logs && self.input_mode == InputMode::Normal {
-            // Global keys like 'q' for quit and 'Tab' for view switching are handled first.
-            match key_event.code {
-                KeyCode::Char('q') => {
-                    self.should_quit = true;
-                    event_consumed = true;
-                }
-                KeyCode::Tab => {
-                    self.active_view = TuiView::VmList; // Cycle from Logs to VmList
-                    self.vm_list_state.select(if self.vms.is_empty() { None } else { Some(0) });
-                    #[cfg(feature = "ollama_integration")]
-                    self.ollama_model_list_state.select(if self.ollama_models.is_empty() { None } else { Some(0) });
-                    event_consumed = true;
-                }
-                // Map keys to TuiWidgetEvent for tui-logger state transition
-                KeyCode::Up => {
-                    self.log_widget_state.transition(&TuiWidgetEvent::UpKey);
-                    event_consumed = true;
-                }
-                KeyCode::Down => {
-                    self.log_widget_state.transition(&TuiWidgetEvent::DownKey);
-                    event_consumed = true;
-                }
-                KeyCode::PageUp => {
-                    self.log_widget_state.transition(&TuiWidgetEvent::PrevPageKey);
-                    event_consumed = true;
-                }
-                KeyCode::PageDown => {
-                    self.log_widget_state.transition(&TuiWidgetEvent::NextPageKey);
-                    event_consumed = true;
-                }
-                KeyCode::Left => {
-                    self.log_widget_state.transition(&TuiWidgetEvent::LeftKey);
-                    event_consumed = true;
-                }
-                KeyCode::Right => {
-                    self.log_widget_state.transition(&TuiWidgetEvent::RightKey);
-                    event_consumed = true;
-                }
-                KeyCode::Char('h') => {
-                    self.log_widget_state.transition(&TuiWidgetEvent::HideKey);
-                    event_consumed = true;
-                }
-                KeyCode::Char('f') => {
-                    self.log_widget_state.transition(&TuiWidgetEvent::FocusKey);
-                    event_consumed = true;
-                }
-                KeyCode::Char('-') => {
-                    self.log_widget_state.transition(&TuiWidgetEvent::MinusKey);
-                    event_consumed = true;
-                }
-                KeyCode::Char('+') | KeyCode::Char('=') => { // '=' is often unshifted '+'
-                    self.log_widget_state.transition(&TuiWidgetEvent::PlusKey);
-                    event_consumed = true;
-                }
-                KeyCode::Esc => {
-                     self.log_widget_state.transition(&TuiWidgetEvent::EscapeKey);
-                     event_consumed = true;
-                }
-                KeyCode::Char(' ') => {
-                    self.log_widget_state.transition(&TuiWidgetEvent::SpaceKey);
-                    event_consumed = true;
-                }
-                // KeyCode::Char('?') for ToggleHelpKey - check if modifiers are involved
-                // KeyCode::Char('d') for ToggleDisplayModeKey
+            let current_selection = self.log_list_state.selected();
+            let num_entries = self.log_entries.len();
 
-                // TODO: Add mappings for ToggleHelpKey ('?') and ToggleDisplayModeKey ('d')
-                // For now, unmapped keys fall through.
-                _ => {
-                    // event_consumed remains false, will be handled by general input logic if any
+            if num_entries == 0 { // No logs, no navigation
+                // Allow global keys like Tab and q to be processed below
+            } else {
+                match key_event.code {
+                    KeyCode::Up => {
+                        if let Some(selected) = current_selection {
+                            if selected > 0 {
+                                self.log_list_state.select(Some(selected - 1));
+                            }
+                        } else {
+                            self.log_list_state.select(Some(num_entries - 1)); // Select last if nothing selected
+                        }
+                        event_consumed = true;
+                    }
+                    KeyCode::Down => {
+                        if let Some(selected) = current_selection {
+                            if selected < num_entries - 1 {
+                                self.log_list_state.select(Some(selected + 1));
+                            }
+                        } else {
+                            self.log_list_state.select(Some(0)); // Select first if nothing selected
+                        }
+                        event_consumed = true;
+                    }
+                    KeyCode::PageUp => {
+                        if let Some(selected) = current_selection {
+                            // For simplicity, jump 10 lines or to the start
+                            let new_selection = selected.saturating_sub(10);
+                            self.log_list_state.select(Some(new_selection));
+                        } else {
+                            self.log_list_state.select(Some(0));
+                        }
+                        event_consumed = true;
+                    }
+                    KeyCode::PageDown => {
+                        if let Some(selected) = current_selection {
+                            // For simplicity, jump 10 lines or to the end
+                            let new_selection = (selected + 10).min(num_entries - 1);
+                            self.log_list_state.select(Some(new_selection));
+                        } else {
+                            self.log_list_state.select(Some((10 as usize).min(num_entries -1 ) )); // select 10th or last
+                        }
+                        event_consumed = true;
+                    }
+                    KeyCode::Home => {
+                        self.log_list_state.select(Some(0));
+                        event_consumed = true;
+                    }
+                    KeyCode::End => {
+                        self.log_list_state.select(Some(num_entries - 1));
+                        event_consumed = true;
+                    }
+                    _ => {} // Other keys fall through to global handling
                 }
             }
         }
 
+        if event_consumed {
+            return;
+        }
+        
+        // Handle input mode switching and global quit
         if !event_consumed {
             // General key handling for other views or modes
             match self.input_mode {
@@ -396,6 +400,30 @@ impl App {
     fn select_previous_item_in_ollama_list(&mut self) { }
 
     pub fn on_tick(&mut self) {
+        // Poll for new log messages
+        if let Some(rx) = &mut self.log_receiver {
+            while let Ok(log_entry) = rx.try_recv() {
+                self.log_entries.push(log_entry);
+                // Optional: Cap the number of log entries, e.g., retain last 1000
+                // if self.log_entries.len() > 1000 {
+                //     self.log_entries.drain(0..self.log_entries.len() - 1000);
+                // }
+            }
+            // If logs view is active and new logs were potentially added, scroll to bottom
+            // (A more robust check would be to see if log_entries actually grew)
+            if self.active_view == TuiView::Logs && !self.log_entries.is_empty() {
+                self.log_list_state.select(Some(self.log_entries.len() - 1));
+            }
+        }
+
+        // Existing on_tick logic (if any) can go here
+        // For example, check for active chat streaming and update UI or poll Ollama
+        if let Some(chat_session) = &mut self.active_chat {
+            if chat_session.is_streaming {
+                // Potentially poll for more stream data here if App is responsible for it
+                // Or this might be handled by a separate tokio task that sends updates via another channel
+            }
+        }
     }
 }
 
@@ -406,6 +434,7 @@ pub fn run_tui(
     env_manager: Arc<EnvironmentManager>,
     audit_engine: Arc<AuditEngine>,
     ollama_manager: Arc<OllamaManager>,
+    log_receiver: mpsc::UnboundedReceiver<UILogEntry>,
 ) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -413,7 +442,15 @@ pub fn run_tui(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let app = App::new(config, session_manager, policy_engine, env_manager, audit_engine, ollama_manager);
+    let app = App::new(
+        config,
+        session_manager,
+        policy_engine,
+        env_manager,
+        audit_engine,
+        ollama_manager,
+        log_receiver,
+    );
     let res = run_app_loop(&mut terminal, app);
 
     disable_raw_mode()?;
