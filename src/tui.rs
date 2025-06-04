@@ -63,6 +63,7 @@ pub struct ChatMessage {
     pub sender: String,
     pub content: String,
     pub timestamp: String,
+    pub thought: Option<String>,
 }
 
 // Represents an active chat session
@@ -358,6 +359,7 @@ impl App {
                                             sender: "user".to_string(),
                                             content: prompt_text.clone(),
                                             timestamp: Local::now().to_rfc3339(),
+                                            thought: None,
                                         });
 
                                         let assistant_model_name = chat_session.model_name.clone();
@@ -365,6 +367,7 @@ impl App {
                                             sender: assistant_model_name.clone(),
                                             content: "".to_string(), // Placeholder
                                             timestamp: Local::now().to_rfc3339(),
+                                            thought: None,
                                         });
                                         chat_session.is_streaming = true;
 
@@ -554,13 +557,9 @@ impl App {
                         }
                         ChatStreamEvent::Error(error_msg) => {
                             if let Some(last_message) = chat_session.messages.last_mut() {
-                                // If last message was empty (placeholder), set it to error.
-                                // Else, append error as a new part or replace.
                                 if last_message.content.is_empty() || chat_session.is_streaming {
                                     last_message.content = format!("[Error] {}", error_msg);
                                 } else {
-                                    // This case might mean an error after some chunks were received and streaming already marked false by a Completed event somehow
-                                    // Or we can just append the error regardless
                                     last_message.content.push_str(&format!("\n[Error] {}", error_msg));
                                 }
                             }
@@ -568,12 +567,31 @@ impl App {
                         }
                         ChatStreamEvent::Completed => {
                             chat_session.is_streaming = false;
-                            // If last message is still empty, maybe put a default like "[No response]"
-                            // if let Some(last_message) = chat_session.messages.last_mut() {
-                            //     if last_message.content.is_empty() && last_message.sender != "user" {
-                            //         last_message.content = "[Response complete]" // Or some other indicator
-                            //     }
-                            // }
+                            if let Some(last_message) = chat_session.messages.last_mut() {
+                                if last_message.sender != "user" { // Only process assistant messages
+                                    let mut new_content = last_message.content.clone();
+                                    let mut thought_text: Option<String> = None;
+
+                                    if let Some(start_think) = new_content.find("<think>") {
+                                        if let Some(end_think) = new_content.rfind("</think>") {
+                                            // Ensure <think> is before </think> and it's somewhat structured like a block
+                                            if start_think < end_think && new_content.starts_with("<think>") {
+                                                // Extract thought
+                                                thought_text = Some(new_content[start_think + "<think>".len()..end_think].to_string());
+                                                // Get content after </think>
+                                                new_content = new_content[end_think + "</think>".len()..].trim_start().to_string();
+                                            }
+                                        }
+                                    }
+                                    last_message.thought = thought_text;
+                                    last_message.content = new_content;
+                                    
+                                    // If content became empty after extracting thought, add a small note or leave as is.
+                                    // if last_message.content.is_empty() && last_message.thought.is_some() {
+                                    //     last_message.content = "(Thought processed)".to_string();
+                                    // }
+                                }
+                            }
                         }
                     }
                 }
