@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEvent},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -276,12 +276,23 @@ impl App {
                                 self.input_mode = InputMode::Editing;
                             }
                         }
+                        KeyCode::BackTab => {
+                            self.active_view = match self.active_view {
+                                TuiView::VmList => TuiView::Logs,
+                                TuiView::OllamaModelList => TuiView::VmList,
+                                TuiView::Chat => TuiView::OllamaModelList,
+                                TuiView::Logs => TuiView::Chat,
+                            };
+                            self.vm_list_state.select(if self.vms.is_empty() { None } else { Some(0) });
+                            #[cfg(feature = "ollama_integration")]
+                            self.ollama_model_list_state.select(if self.ollama_models.is_empty() { None } else { Some(0) });
+                        }
                         KeyCode::Tab => {
                             self.active_view = match self.active_view {
                                 TuiView::VmList => TuiView::OllamaModelList,
                                 TuiView::OllamaModelList => TuiView::Chat,
                                 TuiView::Chat => TuiView::Logs,
-                                TuiView::Logs => TuiView::VmList, // Should have been handled above
+                                TuiView::Logs => TuiView::VmList,
                             };
                             self.vm_list_state.select(if self.vms.is_empty() { None } else { Some(0) });
                             #[cfg(feature = "ollama_integration")]
@@ -400,19 +411,53 @@ impl App {
     fn select_previous_item_in_ollama_list(&mut self) { }
 
     pub fn on_tick(&mut self) {
-        // Poll for new log messages
         if let Some(rx) = &mut self.log_receiver {
+            let mut new_logs_added_count = 0;
+            let mut was_at_bottom = false;
+            let old_len = self.log_entries.len();
+
+            if self.active_view == TuiView::Logs && !self.log_entries.is_empty() {
+                if let Some(selected_idx) = self.log_list_state.selected() {
+                    if selected_idx == old_len - 1 {
+                        was_at_bottom = true;
+                    }
+                } else {
+                    // If nothing was selected, and logs arrive, we should scroll to bottom
+                    was_at_bottom = true; 
+                }
+            }
+
             while let Ok(log_entry) = rx.try_recv() {
                 self.log_entries.push(log_entry);
-                // Optional: Cap the number of log entries, e.g., retain last 1000
-                // if self.log_entries.len() > 1000 {
-                //     self.log_entries.drain(0..self.log_entries.len() - 1000);
-                // }
+                new_logs_added_count += 1;
+                // Optional: Cap the number of log entries
+                const MAX_LOG_ENTRIES: usize = 2000; // Example cap
+                if self.log_entries.len() > MAX_LOG_ENTRIES {
+                    self.log_entries.drain(0..self.log_entries.len() - MAX_LOG_ENTRIES);
+                    // Adjust selection if draining affected it, though auto-scroll logic might handle it
+                    if let Some(selected_idx) = self.log_list_state.selected(){
+                        if selected_idx < (self.log_entries.len() - MAX_LOG_ENTRIES) {
+                             // selection was in the drained part, might need to clear or reset
+                             self.log_list_state.select(None); 
+                        }
+                    }
+                }
             }
-            // If logs view is active and new logs were potentially added, scroll to bottom
-            // (A more robust check would be to see if log_entries actually grew)
-            if self.active_view == TuiView::Logs && !self.log_entries.is_empty() {
-                self.log_list_state.select(Some(self.log_entries.len() - 1));
+
+            if new_logs_added_count > 0 && self.active_view == TuiView::Logs {
+                if was_at_bottom {
+                    self.log_list_state.select(Some(self.log_entries.len() - 1));
+                } else {
+                    // If user had scrolled up, and then logs were drained, ensure selection is still valid.
+                    // This might be complex if draining causes current selection to be out of bounds.
+                    // For now, if not at bottom, we don't auto-scroll. User has to scroll down to see new ones.
+                    // But if draining happened, the selection index might need adjustment if it pointed
+                    // to an entry that no longer exists due to the drain from the beginning.
+                    // The current drain logic selects None if selection was in drained part.
+                    // If logs were added and not at bottom, the selection index remains, but relative position shifts.
+                }
+            } else if self.active_view == TuiView::Logs && self.log_entries.is_empty() {
+                 self.log_list_state.select(None); // Clear selection if no logs
             }
         }
 
