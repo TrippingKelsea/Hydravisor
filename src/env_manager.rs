@@ -7,11 +7,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::config::Config;
-use crate::errors::HydraError;
+// use crate::errors::HydraError; // Not used yet, keep for later if specific errors are needed
 
 // Represents the type of environment
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum EnvironmentType {
+    #[default]
     Vm,
     Container,
 }
@@ -33,7 +34,7 @@ pub struct EnvironmentConfig {
 }
 
 // Represents the runtime state of an environment
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub enum EnvironmentState {
     Provisioning,
     Booting,
@@ -42,23 +43,26 @@ pub enum EnvironmentState {
     Terminated,
     Stopped, // Cleanly shut down, can be restarted
     Error(String),
+    #[default]
     Unknown,
 }
 
 // Detailed status of a running or managed environment
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct EnvironmentStatus {
-    pub instance_id: String,
+    pub instance_id: String, // For VMs, this could be the libvirt UUID or name
+    pub name: String, // For VMs, the libvirt domain name
     pub env_type: EnvironmentType,
     pub state: EnvironmentState,
     pub ip_address: Option<String>,
     pub ssh_port: Option<u16>,
-    pub created_at: String, // ISO 8601 timestamp
+    pub created_at: String, // ISO 8601 timestamp - for VMs, libvirt might not have this directly
     pub updated_at: String, // ISO 8601 timestamp
-    pub base_image: String,
-    pub cpu_usage_percent: Option<f32>,
-    pub memory_usage_mb: Option<u64>,
-    pub disk_usage_gb: Option<u64>,
+    pub base_image: Option<String>, // May not always be known for externally created VMs
+    pub cpu_cores_used: Option<u32>, // Current vCPUs (from libvirt DomainInfo)
+    pub memory_max_kb: Option<u64>,   // Max memory allocated (from libvirt DomainInfo)
+    pub memory_used_kb: Option<u64>, // Current memory usage (from libvirt DomainInfo)
+    // pub disk_usage_gb: Option<u64>, // Harder to get generically from libvirt
     pub error_details: Option<String>,
 }
 
@@ -71,16 +75,15 @@ pub struct EnvironmentManager {
 
 impl EnvironmentManager {
     pub fn new(app_config: &Config) -> Result<Self> {
-        // TODO: Initialize based on app_config
-        // - Check for libvirt/containerd availability based on config and system state.
-        // - Establish connections if enabled and available.
-        // - Load any existing state if Hydravisor is restarting.
+        // Minimal implementation to avoid panic.
+        // Actual initialization (libvirt/containerd connections) will be done later.
         println!(
-            "EnvironmentManager initialized. VM Provider (libvirt) support: TODO, Container Provider (containerd) support: TODO. Config: {:?}",
+            "EnvironmentManager initialized (placeholder). VM Provider support: TODO, Container Provider support: TODO. Config: {:?}",
             app_config.providers
         );
-        todo!("Implement EnvironmentManager initialization, connect to libvirt/containerd if configured and available.");
-        // Ok(EnvironmentManager { .. })
+        Ok(EnvironmentManager {
+            // Initialize fields here if any are added to the struct
+        })
     }
 
     pub fn create_environment(&self, env_config: &EnvironmentConfig) -> Result<EnvironmentStatus> {
@@ -163,6 +166,42 @@ impl EnvironmentManager {
     }
     
     // TODO: Add other lifecycle methods like stop, start, restart as needed.
+
+    // Placeholder method to simulate listing VMs from libvirt
+    pub fn list_vms_placeholder(&self) -> Result<Vec<EnvironmentStatus>> {
+        Ok(vec![
+            EnvironmentStatus {
+                instance_id: "vm-uuid-001".to_string(),
+                name: "dev-vm-arch".to_string(),
+                env_type: EnvironmentType::Vm,
+                state: EnvironmentState::Running,
+                ip_address: Some("192.168.122.101".to_string()),
+                memory_max_kb: Some(4 * 1024 * 1024), // 4GB
+                memory_used_kb: Some(1 * 1024 * 1024), // 1GB
+                cpu_cores_used: Some(2),
+                ..Default::default()
+            },
+            EnvironmentStatus {
+                instance_id: "vm-uuid-002".to_string(),
+                name: "test-vm-ubuntu".to_string(),
+                env_type: EnvironmentType::Vm,
+                state: EnvironmentState::Stopped,
+                memory_max_kb: Some(2 * 1024 * 1024), // 2GB
+                cpu_cores_used: Some(1),
+                ..Default::default()
+            },
+            EnvironmentStatus {
+                instance_id: "vm-uuid-003".to_string(),
+                name: "build-server-debian".to_string(),
+                env_type: EnvironmentType::Vm,
+                state: EnvironmentState::Suspended,
+                ip_address: Some("192.168.122.103".to_string()),
+                memory_max_kb: Some(8 * 1024 * 1024), // 8GB
+                cpu_cores_used: Some(4),
+                ..Default::default()
+            },
+        ])
+    }
 }
 
 // TODO: Add tests for EnvironmentManager:

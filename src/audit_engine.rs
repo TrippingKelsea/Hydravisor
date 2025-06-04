@@ -3,6 +3,7 @@
 use anyhow::Result;
 use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
+use std::fs;
 // use chrono::{DateTime, Utc}; // For timestamps
 
 use crate::config::Config;
@@ -80,21 +81,38 @@ pub enum RiskLevel {
 }
 
 pub struct AuditEngine {
-    // TODO: Configuration for log paths, formats, retention, etc.
+    // Configuration for log paths, formats, retention, etc.
     // config: AuditEngineConfig, (derived from main Config)
-    // TODO: Handle for writing to audit logs (e.g., file, network stream)
+    // Handle for writing to audit logs (e.g., file, network stream)
     // writer: Mutex<Option<Box<dyn Write + Send>>>
+    log_path: PathBuf, // Path to the main audit ledger file
 }
 
 impl AuditEngine {
     pub fn new(app_config: &Config) -> Result<Self> {
-        // TODO: Initialize AuditEngine based on app_config.logging and app_config.audit_policy (if separated)
-        // - Create log directories if they don't exist.
-        // - Set up log rotation if configured.
-        // - Initialize the audit ledger (e.g., hash-chained JSONL).
-        println!("AuditEngine initialized with config: {:?}", app_config.logging);
-        todo!("Implement AuditEngine initialization, including log file/directory setup based on LoggingConfig and potentially a dedicated AuditConfig section.");
-        // Ok(AuditEngine {})
+        let log_dir_str = shellexpand::tilde(&app_config.logging.log_dir).into_owned();
+        let mut audit_log_dir = PathBuf::from(log_dir_str);
+        
+        // Determine the specific subdirectory for audit ledger if needed, or use log_dir directly
+        // For now, let's assume audit ledger goes into a subdirectory "audit" within the main log_dir
+        // as suggested by the comment in record_event: "~/.hydravisor/logs/audit/audit_ledger.jsonl"
+        audit_log_dir.push("audit"); // e.g. ~/.hydravisor/logs/audit/
+
+        if !audit_log_dir.exists() {
+            fs::create_dir_all(&audit_log_dir)
+                .map_err(|e| anyhow::anyhow!("Failed to create audit log directory {:?}: {}", audit_log_dir, e))?;
+        }
+
+        let log_file_path = audit_log_dir.join("audit_ledger.jsonl");
+
+        println!(
+            "AuditEngine initialized. Audit ledger will be at: {:?}",
+            log_file_path
+        );
+        
+        Ok(AuditEngine {
+            log_path: log_file_path,
+        })
     }
 
     pub fn record_event(&self, event: AuditEvent) -> Result<()> {

@@ -10,7 +10,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Terminal,
 };
 use std::{io::{self, Stdout}, sync::Arc, time::{Duration, Instant}};
@@ -19,14 +19,17 @@ use chrono::Local;
 use crate::config::Config;
 use crate::session_manager::SessionManager;
 use crate::policy::PolicyEngine;
-use crate::env_manager::EnvironmentManager;
+use crate::env_manager::{EnvironmentManager, EnvironmentStatus};
 use crate::audit_engine::AuditEngine;
 // use crate::errors::HydraError; // Not used yet
 
 // App state
 pub struct App {
     should_quit: bool,
+    #[allow(dead_code)] // ollama_models will be replaced or put in a tab soon
     ollama_models: Vec<String>,
+    vms: Vec<EnvironmentStatus>,
+    vm_list_state: ListState,
     // Shared core components
     #[allow(dead_code)] // Will be used soon
     config: Arc<Config>,
@@ -53,6 +56,8 @@ impl App {
         let mut app = Self {
             should_quit: false,
             ollama_models: Vec::new(),
+            vms: Vec::new(),
+            vm_list_state: ListState::default(),
             config,
             session_manager,
             policy_engine,
@@ -61,6 +66,10 @@ impl App {
             // ollama_models_list_state: ListState::default(), // Init state if used
         };
         app.fetch_ollama_models(); // Load models on init
+        app.fetch_vms(); // Load VMs on init
+        if !app.vms.is_empty() {
+            app.vm_list_state.select(Some(0)); // Select first VM if list is not empty
+        }
         app
     }
 
@@ -77,10 +86,39 @@ impl App {
         // TODO: Potentially sort or filter based on config.providers.ollama.models if it's a preferred list
     }
 
+    fn fetch_vms(&mut self) {
+        match self.env_manager.list_vms_placeholder() {
+            Ok(vms) => self.vms = vms,
+            Err(e) => {
+                // Log error or set a TUI status message
+                eprintln!("Error fetching VMs: {}", e);
+                self.vms = Vec::new(); // Clear VMs on error
+            }
+        }
+    }
+
     pub fn on_key(&mut self, key: KeyCode) {
         match key {
             KeyCode::Char('q') => {
                 self.should_quit = true;
+            }
+            KeyCode::Down => {
+                if !self.vms.is_empty() {
+                    let i = match self.vm_list_state.selected() {
+                        Some(i) => if i >= self.vms.len() - 1 { 0 } else { i + 1 },
+                        None => 0,
+                    };
+                    self.vm_list_state.select(Some(i));
+                }
+            }
+            KeyCode::Up => {
+                if !self.vms.is_empty() {
+                    let i = match self.vm_list_state.selected() {
+                        Some(i) => if i == 0 { self.vms.len() - 1 } else { i - 1 },
+                        None => 0,
+                    };
+                    self.vm_list_state.select(Some(i));
+                }
             }
             // TODO: Handle other key presses for navigation (e.g., up/down in lists), actions, etc.
             // KeyCode::Up => self.ollama_models_list_state.select_previous(),
@@ -144,7 +182,7 @@ fn run_app_loop(
     let mut last_tick = Instant::now();
 
     loop {
-        terminal.draw(|f| ui(f, &app))?;
+        terminal.draw(|f| ui(f, &mut app))?;
 
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())
@@ -169,7 +207,7 @@ fn run_app_loop(
 }
 
 // Renders the UI
-fn ui(f: &mut ratatui::Frame, app: &App) {
+fn ui(f: &mut ratatui::Frame, app: &mut App) {
     let main_layout_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -181,8 +219,10 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
 
     // 1. Status Bar
     let status_text = format!(
-        "Hydravisor | Mode: {} | Quit: 'q' | Time: {}",
-        app.config.interface.mode, // Example: Display TUI mode from config
+        "Hydravisor | Mode: {} | Quit: 'q' | VMs: {} | Selected: {:?} | Time: {}",
+        app.config.interface.mode,
+        app.vms.len(),
+        app.vm_list_state.selected(),
         Local::now().format("%H:%M:%S")
     );
     let status_bar = Paragraph::new(status_text)
@@ -194,39 +234,57 @@ fn ui(f: &mut ratatui::Frame, app: &App) {
     let content_area_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(30), // Left Pane (e.g., Model List, Session List)
-            Constraint::Percentage(70), // Right Pane (e.g., Details, Logs)
+            Constraint::Percentage(40), // Left Pane (VM List)
+            Constraint::Percentage(60), // Right Pane (Details)
         ].as_ref())
         .split(main_layout_chunks[1]);
 
-    // Left Pane: Ollama Models List
-    let model_items: Vec<ListItem> = app.ollama_models
+    // Left Pane: VMs List
+    let vm_items: Vec<ListItem> = app.vms
         .iter()
-        .map(|model_name| ListItem::new(model_name.as_str()))
+        .map(|vm| {
+            let state_str = format!("{:?}", vm.state);
+            // Display more info if needed, e.g., vm.ip_address
+            ListItem::new(format!("{} ({}) - {}", vm.name, vm.instance_id, state_str))
+        })
         .collect();
 
-    let models_list_widget = List::new(model_items)
-        .block(Block::default().borders(Borders::ALL).title("Local Ollama Models"))
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD).bg(Color::DarkGray)) // Example highlight
-        .highlight_symbol(">> "); // Example highlight symbol
+    let vm_list_widget = List::new(vm_items)
+        .block(Block::default().borders(Borders::ALL).title("Virtual Machines (UP/DOWN to select)"))
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD).bg(Color::DarkGray))
+        .highlight_symbol(">> ");
     
-    // If selection state is added to App:
-    // f.render_stateful_widget(models_list_widget, content_area_chunks[0], &mut app.ollama_models_list_state);
-    f.render_widget(models_list_widget, content_area_chunks[0]);
+    f.render_stateful_widget(vm_list_widget, content_area_chunks[0], &mut app.vm_list_state);
 
+    // Right Pane: Details of selected VM (Placeholder for now)
+    let right_pane_title = "VM Details";
+    let mut detail_text = "Select a VM to see details.".to_string();
+    if let Some(selected_index) = app.vm_list_state.selected() {
+        if let Some(selected_vm) = app.vms.get(selected_index) {
+            // right_pane_title = format!("Details for: {}", selected_vm.name);
+            detail_text = format!(
+                "ID: {}\nName: {}\nState: {:?}\nIP: {}\nCPU Cores: {}\nMax Memory: {} KB\nUsed Memory: {} KB",
+                selected_vm.instance_id,
+                selected_vm.name,
+                selected_vm.state,
+                selected_vm.ip_address.as_deref().unwrap_or("N/A"),
+                selected_vm.cpu_cores_used.map_or("N/A".to_string(), |c| c.to_string()),
+                selected_vm.memory_max_kb.map_or("N/A".to_string(), |m| m.to_string()),
+                selected_vm.memory_used_kb.map_or("N/A".to_string(), |m| m.to_string())
+            );
+        }
+    }
 
-    // Right Pane (Placeholder for now)
-    let right_pane_content = Paragraph::new("Details View Pane
-
-Select an item from a list or view logs here.")
-        .block(Block::default().borders(Borders::ALL).title("Details / Output"));
+    let right_pane_content = Paragraph::new(detail_text)
+        .block(Block::default().borders(Borders::ALL).title(right_pane_title))
+        .wrap(ratatui::widgets::Wrap { trim: true });
     f.render_widget(right_pane_content, content_area_chunks[1]);
 
     // 3. Dialog Interface (Placeholder for now)
     let dialog_text = if app.should_quit {
-        "Quitting Hydravisor... (Goodbye!)"
+        "Quitting Hydravisor..."
     } else {
-        "Model Interaction Area (Future Implementation)"
+        "Model Interaction Area / Command Input (Future)"
     };
     let dialog_area = Paragraph::new(dialog_text)
         .block(Block::default().borders(Borders::ALL).title("LLM Dialog / Input"));

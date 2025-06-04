@@ -3,8 +3,9 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc};
 use std::collections::HashMap;
-// use std::sync::{Arc, Mutex};
+// use std::sync::{Mutex};
 
 use crate::config::Config as AppConfig;
 use crate::env_manager::{EnvironmentConfig, EnvironmentManager, EnvironmentStatus, EnvironmentType};
@@ -65,33 +66,36 @@ pub struct SshConnectionDetails {
 }
 
 pub struct SessionManager {
-    // app_config: Arc<AppConfig>,
-    // env_manager: Arc<EnvironmentManager>,
-    // policy_engine: Arc<PolicyEngine>,
-    // ssh_manager: Arc<SshManager>,
-    // audit_engine: Arc<AuditEngine>,
-    // active_sessions: Mutex<HashMap<String, Session>>,
+    app_config: Arc<AppConfig>,
+    env_manager: Arc<EnvironmentManager>,
+    policy_engine: Arc<PolicyEngine>,
+    ssh_manager: Arc<SshManager>,
+    audit_engine: Arc<AuditEngine>,
+    active_sessions: tokio::sync::Mutex<HashMap<String, Session>>,
     // tmux_handler: TmuxHandler, // Struct to encapsulate tmux commands
 }
 
 impl SessionManager {
     pub fn new(
-        _app_config: std::sync::Arc<AppConfig>,
-        _env_manager: std::sync::Arc<EnvironmentManager>,
-        _policy_engine: std::sync::Arc<PolicyEngine>,
-        _ssh_manager: std::sync::Arc<SshManager>,
-        _audit_engine: std::sync::Arc<AuditEngine>,
+        app_config: Arc<AppConfig>,
+        env_manager: Arc<EnvironmentManager>,
+        policy_engine: Arc<PolicyEngine>,
+        ssh_manager: Arc<SshManager>,
+        audit_engine: Arc<AuditEngine>,
     ) -> Result<Self> {
-        // TODO: Initialize SessionManager:
-        // - Store references to other managers/engines.
-        // - Initialize TmuxHandler.
-        // - Load any persisted session state if applicable (though sessions are often ephemeral).
-        println!("SessionManager initialized.");
-        todo!("Implement SessionManager initialization, including TmuxHandler.");
-        // Ok(SessionManager { ... })
+        println!("SessionManager initialized (minimal).");
+        Ok(SessionManager {
+            app_config,
+            env_manager,
+            policy_engine,
+            ssh_manager,
+            audit_engine,
+            active_sessions: tokio::sync::Mutex::new(HashMap::new()),
+            // tmux_handler: TmuxHandler::new(&app_config)?, // Placeholder for when TmuxHandler is ready
+        })
     }
 
-    pub fn create_session(&self, request: &CreateSessionRequest) -> Result<CreateSessionResponse> {
+    pub async fn create_session(&self, request: &CreateSessionRequest) -> Result<CreateSessionResponse> {
         // TODO: Implement session creation logic:
         // 1. Generate a unique session_id.
         // 2. Determine EnvironmentConfig:
@@ -117,37 +121,79 @@ impl SessionManager {
 
         println!("Creating session for request: {:?}", request);
         let session_id = format!("sess_{}", uuid::Uuid::new_v4().simple());
-        // Placeholder - this needs full EnvConfig derivation logic
-        let env_conf = request.custom_env_config.clone().ok_or_else(|| HydraError::SessionManagerError("Custom env config required for now".to_string()))?;
+        
+        // Simplified EnvConfig derivation for now
+        let env_conf = match &request.custom_env_config {
+            Some(conf) => conf.clone(),
+            None => {
+                // TODO: Implement proper template loading and default application
+                // For now, if no custom_env_config, return error or use a very basic default.
+                // This part needs to align with PolicyEngine and TemplateManager (future).
+                // Returning an error or a very minimal default if no custom config.
+                // For placeholder purposes, let's create a minimal default if not present.
+                // In a real scenario, this default might come from app_config or be an error.
+                if let Some(template_name) = &request.environment_template {
+                    println!("Template specified: {}. Template loading not yet implemented.", template_name);
+                    // Fallback to a basic default for now if template logic is not there
+                }
+                EnvironmentConfig {
+                    instance_id: format!("env-{}", uuid::Uuid::new_v4().simple()),
+                    env_type: EnvironmentType::Vm, // Default
+                    base_image: "placeholder-default-image".to_string(),
+                    cpu_cores: 1,
+                    memory_mb: 1024,
+                    disk_gb: Some(10),
+                    network_policy: "default".to_string(),
+                    security_policy: "default".to_string(),
+                    custom_script: None,
+                    template_name: request.environment_template.clone(),
+                    labels: None,
+                }
+            }
+        };
 
         // Example call to env_manager (assuming env_manager is `self.env_manager`)
-        // let env_status = self.env_manager.create_environment(&env_conf)?;
-        let placeholder_env_status = EnvironmentStatus { /* ... fill with dummy data ... */ instance_id: env_conf.instance_id.clone(), env_type: env_conf.env_type.clone(), state: crate::env_manager::EnvironmentState::Provisioning, ip_address: None, ssh_port: None, created_at: "".to_string(), updated_at: "".to_string(), base_image: "".to_string(), cpu_usage_percent: None, memory_usage_mb: None, disk_usage_gb: None, error_details: None };
+        let env_status_from_creation = self.env_manager.create_environment(&env_conf)?; // Assuming this returns EnvironmentStatus
+
+        // Corrected placeholder_env_status initialization
+        let placeholder_env_status = EnvironmentStatus {
+            instance_id: env_conf.instance_id.clone(),
+            name: format!("env-{}", env_conf.instance_id.chars().take(8).collect::<String>()), // Example name
+            env_type: env_conf.env_type.clone(),
+            state: env_status_from_creation.state, // Use state from actual env creation
+            ip_address: env_status_from_creation.ip_address,
+            ssh_port: env_status_from_creation.ssh_port,
+            base_image: Some(env_conf.base_image.clone()), // Corrected: Option<String>
+            // cpu_usage_percent, memory_usage_mb, disk_usage_gb are removed
+            // using ..Default::default() for other fields like cpu_cores_used, memory_max_kb etc.
+            ..Default::default()
+        };
 
         let session = Session {
             session_id: session_id.clone(),
             environment_instance_id: env_conf.instance_id.clone(),
             environment_type: env_conf.env_type.clone(),
-            agent_id: request.requested_by_agent_id.clone(),
-            model_id: request.requested_model_id.clone(),
+            agent_id: request.requested_by_agent_id.clone(), // Corrected field name from request
+            model_id: request.requested_model_id.clone(),   // Corrected field name from request
             tmux_session_name: Some(format!("hydravisor-{}", session_id)),
-            created_at: "TODO:Timestamp".to_string(),
-            status: SessionStatus::Pending,
+            created_at: chrono::Utc::now().to_rfc3339(),     // Corrected: Use chrono for timestamp
+            status: SessionStatus::Pending,                  // Or Active, depending on env_manager behavior
         };
 
-        // self.active_sessions.lock().unwrap().insert(session_id.clone(), session.clone());
+        self.active_sessions.lock().await.insert(session_id.clone(), session.clone());
         // self.audit_engine.record_event(...);
 
+        // The rest of the function body is still todo!()
         todo!("Full implementation of create_session including authorization, env creation, SSH key handling, tmux setup, and audit.");
 
         // Ok(CreateSessionResponse {
         //     session,
-        //     environment_status: placeholder_env_status,
+        //     environment_status: placeholder_env_status, // Use the corrected one
         //     ssh_details: None, // Populate if SSH is set up
         // })
     }
 
-    pub fn attach_agent_to_session(&self, session_id: &str, agent_id: &str, model_id: Option<&str>) -> Result<()> {
+    pub async fn attach_agent_to_session(&self, session_id: &str, agent_id: &str, model_id: Option<&str>) -> Result<()> {
         // TODO: Implement agent attachment logic:
         // 1. Find the session by `session_id`.
         // 2. Authorize: Check if `agent_id` can attach to this session/environment (PolicyEngine).
@@ -160,7 +206,7 @@ impl SessionManager {
         // Ok(())
     }
 
-    pub fn terminate_session(&self, session_id: &str) -> Result<()> {
+    pub async fn terminate_session(&self, session_id: &str) -> Result<()> {
         // TODO: Implement session termination:
         // 1. Find session by `session_id`.
         // 2. Call `env_manager.destroy_environment()` for the associated `environment_instance_id`.
@@ -173,18 +219,16 @@ impl SessionManager {
         // Ok(())
     }
 
-    pub fn get_session(&self, session_id: &str) -> Result<Option<Session>> {
+    pub async fn get_session(&self, session_id: &str) -> Result<Option<Session>> {
         // TODO: Retrieve session details from `active_sessions`.
         println!("Getting session details for: {}", session_id);
-        todo!("Implement retrieval of session details.");
-        // Ok(self.active_sessions.lock().unwrap().get(session_id).cloned())
+        Ok(self.active_sessions.lock().await.get(session_id).cloned())
     }
 
-    pub fn list_sessions(&self) -> Result<Vec<Session>> {
+    pub async fn list_sessions(&self) -> Result<Vec<Session>> {
         // TODO: List all active sessions.
         println!("Listing all active sessions.");
-        todo!("Implement listing of active sessions.");
-        // Ok(self.active_sessions.lock().unwrap().values().cloned().collect())
+        Ok(self.active_sessions.lock().await.values().cloned().collect())
     }
 
     // TODO: Add methods for handling tmux session recording (start, stop, export path) based on SessionRecordingPolicy.

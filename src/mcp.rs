@@ -3,11 +3,12 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 // use tokio::net::{UnixListener, UnixStream}; // For Unix domain socket
 // use tokio::sync::mpsc; // For message passing between MCP server and other parts of Hydravisor
 
-use crate::config::Config;
-use crate::errors::HydraError;
+use crate::config::{Config, McpConfig as McpModuleConfig}; // Specified McpConfig import
+// use crate::errors::HydraError; // Not used yet
 
 // Core MCP message structure (as per mcp.design.md)
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -51,9 +52,9 @@ pub struct McpClient {
 }
 
 pub struct McpServer {
-    // config: McpConfig, // Derived from main Config.mcp
-    // listener: UnixListener,
-    // active_clients: Mutex<HashMap<String, Arc<McpClient>>>,
+    config: Arc<McpModuleConfig>, // Store the MCP specific config, wrapped in Arc
+    // listener: UnixListener, // Will be initialized later
+    // active_clients: tokio::sync::Mutex<HashMap<String, Arc<McpClient>>>, // Using tokio Mutex
     // dispatcher_tx: mpsc::Sender<McpMessageWithOrigin> // To send messages to core Hydravisor logic
 }
 
@@ -65,18 +66,19 @@ pub struct McpMessageWithOrigin {
 }
 
 impl McpServer {
-    pub async fn start(app_config: &Config /*, core_dispatcher_tx: mpsc::Sender<McpMessageWithOrigin>*/) -> Result<Self> {
-        // TODO: Initialize McpServer based on app_config.mcp:
-        // 1. Set up the Unix domain socket (or WebSocket in future) listener.
-        //    - Path from app_config.mcp.socket_path.
-        //    - Handle potential errors if socket path is in use or not writable.
-        // 2. Initialize active_clients map.
-        // 3. Store dispatcher_tx for sending messages to the core application logic.
-        // 4. Start the main accept loop in a separate tokio task.
-        println!("MCP Server starting. Listening on: {}, Timeout: {}ms, Heartbeat: {}s", 
-                 app_config.mcp.socket_path, app_config.mcp.timeout_ms, app_config.mcp.heartbeat_interval);
-        todo!("Implement McpServer start: setup listener, accept loop.");
-        // Ok(McpServer { ... })
+    pub async fn start(app_config: Arc<Config> /*, core_dispatcher_tx: mpsc::Sender<McpMessageWithOrigin>*/) -> Result<Self> {
+        println!(
+            "MCP Server initialized (minimal). Listening on: {}, Timeout: {}ms, Heartbeat: {}s",
+            app_config.mcp.socket_path,
+            app_config.mcp.timeout_ms,
+            app_config.mcp.heartbeat_interval
+        );
+        Ok(McpServer {
+            config: Arc::new(app_config.mcp.clone()), // Clone McpConfig and wrap in Arc
+            // listener: ... // Placeholder for actual listener setup
+            // active_clients: tokio::sync::Mutex::new(HashMap::new()), // Placeholder
+            // dispatcher_tx: core_dispatcher_tx, // Placeholder
+        })
     }
 
     // This would run in a loop in a dedicated tokio task
