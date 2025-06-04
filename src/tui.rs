@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEvent},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -83,6 +83,14 @@ pub struct UILogEntry {
     // Consider adding: pub file: Option<String>, pub line: Option<u32>,
 }
 
+// New enum for TUI chat stream events
+#[derive(Clone, Debug)]
+pub enum ChatStreamEvent {
+    Chunk(String),      // A piece of the response
+    Error(String),      // An error occurred during streaming
+    Completed,          // Streaming finished successfully
+}
+
 pub struct App {
     should_quit: bool,
     
@@ -111,6 +119,11 @@ pub struct App {
     log_entries: Vec<UILogEntry>,
     log_list_state: ListState,
     log_receiver: Option<mpsc::UnboundedReceiver<UILogEntry>>,
+
+    // For Ollama chat streaming
+    chat_stream_sender: mpsc::UnboundedSender<ChatStreamEvent>,
+    chat_stream_receiver: Option<mpsc::UnboundedReceiver<ChatStreamEvent>>,
+    chat_list_state: ListState,
 }
 
 impl App {
@@ -123,6 +136,9 @@ impl App {
         ollama_manager: Arc<OllamaManager>,
         log_receiver: mpsc::UnboundedReceiver<UILogEntry>,
     ) -> Self {
+        // Create channel for chat stream events
+        let (chat_tx, chat_rx) = mpsc::unbounded_channel::<ChatStreamEvent>();
+
         let mut app = Self {
             should_quit: false,
             ollama_models: Vec::new(),
@@ -143,6 +159,9 @@ impl App {
             log_entries: Vec::new(),
             log_list_state: ListState::default(),
             log_receiver: Some(log_receiver),
+            chat_stream_sender: chat_tx,
+            chat_stream_receiver: Some(chat_rx),
+            chat_list_state: ListState::default(),
         };
 
         #[cfg(feature = "ollama_integration")]
@@ -340,14 +359,74 @@ impl App {
                                             content: prompt_text.clone(),
                                             timestamp: Local::now().to_rfc3339(),
                                         });
-                                        chat_session.is_streaming = true;
-                                        let model_name_clone = chat_session.model_name.clone();
+
+                                        let assistant_model_name = chat_session.model_name.clone();
                                         chat_session.messages.push(ChatMessage {
-                                            sender: model_name_clone,
-                                            content: format!("Echo (TODO: actual Ollama call): {}", prompt_text),
+                                            sender: assistant_model_name.clone(),
+                                            content: "".to_string(), // Placeholder
                                             timestamp: Local::now().to_rfc3339(),
                                         });
-                                        chat_session.is_streaming = false;
+                                        chat_session.is_streaming = true;
+
+                                        #[cfg(feature = "ollama_integration")]
+                                        {
+                                            // Clone necessary data for the async task
+                                            let ollama_manager_clone = Arc::clone(&self.ollama_manager);
+                                            let chat_stream_sender_clone = self.chat_stream_sender.clone();
+                                            
+                                            if let Ok(handle) = Handle::try_current() { // Handle is in scope due to feature gate on this block
+                                                handle.spawn(async move {
+                                                    match ollama_manager_clone.generate_response_stream(assistant_model_name.clone(), prompt_text).await {
+                                                        Ok(mut stream) => {
+                                                            // The stream from the ollama_integration feature IS StreamExt
+                                                            while let Some(result_chunk) = futures::StreamExt::next(&mut stream).await {
+                                                                match result_chunk {
+                                                                    Ok(chunk) => {
+                                                                        if chat_stream_sender_clone.send(ChatStreamEvent::Chunk(chunk)).is_err() {
+                                                                            break; // Receiver dropped
+                                                                        }
+                                                                    }
+                                                                    Err(e) => {
+                                                                        let error_msg = format!("Ollama stream error: {}", e);
+                                                                        let _ = chat_stream_sender_clone.send(ChatStreamEvent::Error(error_msg));
+                                                                        break; // Stop on stream error
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            let error_msg = format!("Failed to start Ollama stream: {}", e);
+                                                            let _ = chat_stream_sender_clone.send(ChatStreamEvent::Error(error_msg));
+                                                        }
+                                                    }
+                                                    let _ = chat_stream_sender_clone.send(ChatStreamEvent::Completed);
+                                                });
+                                            } else {
+                                                // This else block is under ollama_integration feature gate
+                                                let error_msg = "Failed to spawn Ollama stream task: No Tokio runtime (ollama_integration active).".to_string();
+                                                if let Some(active_chat_session) = &mut self.active_chat {
+                                                    if let Some(last_message) = active_chat_session.messages.last_mut() {
+                                                        last_message.content = error_msg.clone();
+                                                    }
+                                                    active_chat_session.is_streaming = false;
+                                                }
+                                                let _ = self.chat_stream_sender.send(ChatStreamEvent::Error(error_msg));
+                                                let _ = self.chat_stream_sender.send(ChatStreamEvent::Completed);
+                                            }
+                                        }
+
+                                        #[cfg(not(feature = "ollama_integration"))]
+                                        {
+                                            // Ollama integration is disabled, provide a canned response
+                                            if let Some(active_chat_session) = &mut self.active_chat {
+                                                if let Some(last_message) = active_chat_session.messages.last_mut() {
+                                                    last_message.content = "Ollama integration is disabled.".to_string();
+                                                }
+                                                active_chat_session.is_streaming = false;
+                                            }
+                                            // We can still send Completed via channel if desired, or just update UI directly
+                                            let _ = self.chat_stream_sender.send(ChatStreamEvent::Completed); 
+                                        }
                                     }
                                 }
                             }
@@ -461,12 +540,61 @@ impl App {
             }
         }
 
-        // Existing on_tick logic (if any) can go here
-        // For example, check for active chat streaming and update UI or poll Ollama
+        // Poll for chat stream events
+        if let Some(chat_rx) = &mut self.chat_stream_receiver {
+            while let Ok(event) = chat_rx.try_recv() {
+                if let Some(chat_session) = &mut self.active_chat {
+                    match event {
+                        ChatStreamEvent::Chunk(chunk) => {
+                            if chat_session.is_streaming {
+                                if let Some(last_message) = chat_session.messages.last_mut() {
+                                    last_message.content.push_str(&chunk);
+                                }
+                            }
+                        }
+                        ChatStreamEvent::Error(error_msg) => {
+                            if let Some(last_message) = chat_session.messages.last_mut() {
+                                // If last message was empty (placeholder), set it to error.
+                                // Else, append error as a new part or replace.
+                                if last_message.content.is_empty() || chat_session.is_streaming {
+                                    last_message.content = format!("[Error] {}", error_msg);
+                                } else {
+                                    // This case might mean an error after some chunks were received and streaming already marked false by a Completed event somehow
+                                    // Or we can just append the error regardless
+                                    last_message.content.push_str(&format!("\n[Error] {}", error_msg));
+                                }
+                            }
+                            chat_session.is_streaming = false;
+                        }
+                        ChatStreamEvent::Completed => {
+                            chat_session.is_streaming = false;
+                            // If last message is still empty, maybe put a default like "[No response]"
+                            // if let Some(last_message) = chat_session.messages.last_mut() {
+                            //     if last_message.content.is_empty() && last_message.sender != "user" {
+                            //         last_message.content = "[Response complete]" // Or some other indicator
+                            //     }
+                            // }
+                        }
+                    }
+                }
+            }
+            // Auto-scroll chat view if active and new content might have arrived
+            if self.active_view == TuiView::Chat {
+                if let Some(chat_session) = &self.active_chat {
+                    if !chat_session.messages.is_empty() {
+                        // Simplified: always scroll to bottom if chat view is active during tick with events.
+                        // Similar to logs, can be made smarter to respect user scroll position.
+                        self.chat_list_state.select(Some(chat_session.messages.len() - 1));
+                    }
+                }
+            }
+        }
+
+        // Existing on_tick logic for active_chat.is_streaming (currently empty)
         if let Some(chat_session) = &mut self.active_chat {
             if chat_session.is_streaming {
-                // Potentially poll for more stream data here if App is responsible for it
-                // Or this might be handled by a separate tokio task that sends updates via another channel
+                // This flag is now primarily managed by ChatStreamEvents.
+                // Can be used for UI elements like a spinner.
             }
         }
     }

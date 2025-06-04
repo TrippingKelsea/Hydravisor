@@ -17,7 +17,6 @@ use ollama_rs::generation::completion::request::GenerationRequest;
 #[cfg(feature = "ollama_integration")]
 use futures::stream::StreamExt;
 
-
 pub struct OllamaManager {
     #[cfg(feature = "ollama_integration")]
     client: Option<Ollama>,
@@ -107,16 +106,15 @@ impl OllamaManager {
     ) -> Result<impl StreamExt<Item = Result<String, ollama_rs::error::OllamaError>>> {
         if let Some(client) = &self.client {
             debug!("Generating response stream from Ollama model: {}, prompt: \"{}\"", model_name, prompt);
-            let request = GenerationRequest::new(model_name.clone(), prompt.clone()); // Clone for potential re-use or logging
+            let request = GenerationRequest::new(model_name.clone(), prompt.clone());
             match client.generate_stream(request).await {
-                Ok(stream) => {
+                Ok(ollama_stream) => {
                     debug!("Successfully started generation stream for model: {}", model_name);
-                    Ok(stream.map(|res_chunk_result| {
-                        // res_chunk_result is Result<Vec<GenerationResponse>, OllamaError>
-                        res_chunk_result.map(|generation_responses| {
-                            // Concatenate responses from the Vec<GenerationResponse>
-                            // Typically, there's one response string per GenerationResponse object in the vector.
-                            generation_responses.into_iter().map(|gr| gr.response).collect::<String>()
+                    Ok(ollama_stream.map(|result_vec_gen_response| {
+                        // result_vec_gen_response is Result<Vec<GenerationResponse>, OllamaError>
+                        result_vec_gen_response.map(|vec_gen_response| {
+                            // Iterate over the vector and collect the response strings
+                            vec_gen_response.into_iter().map(|gr| gr.response).collect::<String>()
                         })
                     }))
                 },
@@ -127,10 +125,19 @@ impl OllamaManager {
             }
         } else {
             warn!("Ollama client not available for generation.");
-            // This case is tricky for streams. We might need to return an empty stream or an error that the caller can handle.
-            // For now, let's use a simple error.
              Err(anyhow::anyhow!("Ollama client not available"))
         }
+    }
+
+    #[cfg(not(feature = "ollama_integration"))]
+    #[allow(clippy::unused_async)]
+    pub async fn generate_response_stream(
+        &self,
+        model_name: String,
+        prompt: String,
+    ) -> Result<futures::stream::Empty<Result<String, String>>> {
+        warn!("Ollama integration not enabled. Cannot generate stream for model: {}, prompt: {}", model_name, prompt);
+        Ok(futures::stream::empty()) 
     }
 
     // Added to help main.rs logging logic, can be removed if OllamaManager::new becomes more robust
