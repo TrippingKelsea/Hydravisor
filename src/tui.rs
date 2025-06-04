@@ -358,7 +358,7 @@ impl App {
                                         chat_session.messages.push(ChatMessage {
                                             sender: "user".to_string(),
                                             content: prompt_text.clone(),
-                                            timestamp: Local::now().to_rfc3339(),
+                                            timestamp: Local::now().format("%H:%M:%S").to_string(),
                                             thought: None,
                                         });
 
@@ -366,7 +366,7 @@ impl App {
                                         chat_session.messages.push(ChatMessage {
                                             sender: assistant_model_name.clone(),
                                             content: "".to_string(), // Placeholder
-                                            timestamp: Local::now().to_rfc3339(),
+                                            timestamp: Local::now().format("%H:%M:%S").to_string(),
                                             thought: None,
                                         });
                                         chat_session.is_streaming = true;

@@ -17,8 +17,8 @@ impl ChatWidget {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(30), // Left pane for chat info - decreased size
-                Constraint::Percentage(70), // Right pane for messages - increased size
+                Constraint::Percentage(40), // Left pane for chat info - increased to 40%
+                Constraint::Percentage(60), // Right pane for messages - decreased to 60%
             ].as_ref())
             .split(area);
 
@@ -49,7 +49,7 @@ impl ChatWidget {
         let messages_area = right_pane_block.inner(chunks[1]);
         f.render_widget(right_pane_block, chunks[1]);
 
-        let content_width = messages_area.width.saturating_sub(2) as usize; // Adjusted for textwrap, ensure usize
+        let content_width = messages_area.width.saturating_sub(2) as usize;
 
         if let Some(chat_session) = &mut app.active_chat {
             let message_items: Vec<ListItem> = chat_session.messages.iter().enumerate().map(|(idx, msg)| {
@@ -59,11 +59,24 @@ impl ChatWidget {
                     Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
                 };
                 
+                let available_width_for_ts_line = messages_area.width; // Total width available for the line
+                let timestamp_len = msg.timestamp.chars().count();
+                
+                // Effective width for text rendering seems to be 3 chars less than total available
+                let effective_text_width = (available_width_for_ts_line as usize).saturating_sub(3);
+                
+                let num_spaces = if timestamp_len < effective_text_width {
+                    effective_text_width - timestamp_len
+                } else {
+                    0 // Timestamp itself is too long or exactly fits the (reduced) effective width
+                };
+                
+                let padding = " ".repeat(num_spaces);
+                let formatted_timestamp_str = format!("{}{}", padding, msg.timestamp);
+
                 let mut lines_for_list_item = vec![
                     Line::from(Span::styled(format!("{}: ", msg.sender), sender_style)),
-                    // Consider moving timestamp to be part of the first line or a dedicated small side area if layout allows
-                    // For now, keeping it as a separate line, right-aligned.
-                    Line::from(Span::styled(format!("(@{})", msg.timestamp), Style::default().fg(Color::DarkGray))).alignment(ratatui::layout::Alignment::Right),
+                    Line::from(Span::styled(formatted_timestamp_str, Style::default().fg(Color::DarkGray))), 
                 ];
 
                 // Render thought if present
