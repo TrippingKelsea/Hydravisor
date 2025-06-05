@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 use chrono::Local;
-use crate::tui::{App, InputMode, AppView};
+use crate::tui::app::{App, InputMode, AppView};
 
 pub struct StatusBarWidget;
 
@@ -17,6 +17,12 @@ impl StatusBarWidget {
         let status_bar_style = Style::default()
             .fg(theme.status_bar_foreground)
             .bg(theme.status_bar_background);
+        
+        let outlined_h_style = if app.show_menu {
+            Style::default().fg(theme.quaternary_foreground).bg(theme.primary_background).bold()
+        } else {
+            status_bar_style
+        };
 
         let status_bar_layout = Layout::default()
             .direction(Direction::Horizontal)
@@ -34,7 +40,8 @@ impl StatusBarWidget {
         };
 
         let status_spans_left = Line::from(vec![
-            Span::styled("Hydravisor | ", status_bar_style),
+            Span::styled("H", outlined_h_style),
+            Span::styled("ydravisor | ", status_bar_style),
             Span::styled("View: ", status_bar_style),
             Span::styled(format!("{:?}", app.active_view), 
                          Style::default().fg(theme.status_bar_view_name_fg).bg(theme.status_bar_background).bold()),
@@ -51,8 +58,7 @@ impl StatusBarWidget {
 
         let mut status_spans_right = vec![];
         if app.active_view == AppView::VmList {
-            let libvirt_connected = app.env_manager.is_libvirt_connected();
-            let (status_text, status_style) = if libvirt_connected {
+            let (status_text, status_style) = if app.libvirt_connected {
                 ("Connected", Style::default().fg(theme.success_text))
             } else {
                 ("Disconnected", Style::default().fg(theme.error_text))

@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
-use crate::tui::{App, InputMode};
+use crate::tui::app::{App, InputMode, AppView};
 use textwrap;
 
 pub struct InputBarWidget;
@@ -25,7 +25,7 @@ impl InputBarWidget {
                 Span::styled(model_name.clone(), theme.input_bar_title.patch(Style::default().add_modifier(Modifier::BOLD))),
                 Span::styled(":", theme.input_bar_title),
             ])
-        } else if app.active_view == crate::tui::AppView::Chat && app.active_chat.is_some() && is_editing_mode {
+        } else if app.active_view == AppView::Chat && app.active_chat.is_some() && is_editing_mode {
             Line::from(Span::styled("Chat Input (Esc: Normal Mode):", theme.input_bar_title))
         } else {
             Line::from(Span::styled("Input:", theme.input_bar_title)) 
@@ -108,5 +108,23 @@ impl InputBarWidget {
             .scroll((app.input_bar_scroll, 0));
         
         f.render_widget(paragraph, area);
+    }
+
+    pub fn calculate_height(app: &App, width: u16) -> u16 {
+        let text_area_width = width.saturating_sub(2).max(1);
+        let text = if app.editing_system_prompt_for_model.is_some() || app.input_mode == InputMode::Editing {
+            &app.current_input
+        } else {
+            // In normal mode, if there's no active editing, we can consider it empty
+            // for layout purposes, or show a placeholder. Let's use a single line.
+            ""
+        };
+
+        if text.is_empty() {
+            return 3; // Default height for an empty input bar
+        }
+
+        let wrapped_lines = textwrap::wrap(text, text_area_width as usize).len();
+        (wrapped_lines as u16).max(1).saturating_add(2).min(10) // Add 2 for borders, max height 10
     }
 }

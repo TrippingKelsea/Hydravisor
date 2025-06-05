@@ -17,6 +17,7 @@ mod ollama_manager;
 use anyhow::Result;
 use clap::Parser;
 use std::sync::Arc;
+use tokio::sync::Mutex; // Use tokio's Mutex
 use std::fs::create_dir_all; // For creating log directory
 
 use cli::Cli;
@@ -125,12 +126,6 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Override log level from CLI if specified (after config load, CLI takes precedence for this)
-    // This needs to re-initialize the global subscriber or adjust its filter.
-    // For simplicity now, we set it once. A more dynamic setup could be added.
-    // Based on cli_args.log_level and config.logging.level.
-    // Current setup: EnvFilter from RUST_LOG, then default 'info'. CLI arg could modify EnvFilter upon init.
-
     info!("Configuration loaded. Effective log level controlled by RUST_LOG, CLI (--log-level), or default.");
     debug!("Loaded app config: {:?}", config);
 
@@ -161,7 +156,7 @@ async fn main() -> Result<()> {
     info!("Audit Engine initialized.");
 
     let env_manager = match EnvironmentManager::new(&config) {
-        Ok(manager) => Arc::new(manager),
+        Ok(manager) => Arc::new(Mutex::new(manager)),
         Err(e) => {
             error!("Failed to initialize Environment Manager: {}", e);
             return Err(e.into());
@@ -173,7 +168,7 @@ async fn main() -> Result<()> {
     let ollama_manager = match ollama_manager_result {
         Ok(manager) => {
             info!("Ollama Manager initialized successfully.");
-            Arc::new(manager)
+            Arc::new(Mutex::new(manager))
         }
         Err(e) => {
             #[cfg(feature = "ollama_integration")]
@@ -220,6 +215,7 @@ async fn main() -> Result<()> {
         // Launch TUI if no subcommand and not headless
         info!("No subcommand provided and not headless, launching TUI.");
         crate::tui::run_tui(
+            &tokio::runtime::Handle::current(), // Pass the handle
             Arc::clone(&config),
             Arc::clone(&session_manager),
             Arc::clone(&policy_engine),

@@ -5,7 +5,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc};
 use std::collections::HashMap;
-// use std::sync::{Mutex};
+use tokio::sync::Mutex;
 
 use crate::config::Config as AppConfig;
 use crate::env_manager::{EnvironmentConfig, EnvironmentManager, EnvironmentStatus, EnvironmentType};
@@ -67,7 +67,7 @@ pub struct SshConnectionDetails {
 
 pub struct SessionManager {
     app_config: Arc<AppConfig>,
-    env_manager: Arc<EnvironmentManager>,
+    env_manager: Arc<Mutex<EnvironmentManager>>,
     policy_engine: Arc<PolicyEngine>,
     ssh_manager: Arc<SshManager>,
     audit_engine: Arc<AuditEngine>,
@@ -78,7 +78,7 @@ pub struct SessionManager {
 impl SessionManager {
     pub fn new(
         app_config: Arc<AppConfig>,
-        env_manager: Arc<EnvironmentManager>,
+        env_manager: Arc<Mutex<EnvironmentManager>>,
         policy_engine: Arc<PolicyEngine>,
         ssh_manager: Arc<SshManager>,
         audit_engine: Arc<AuditEngine>,
@@ -154,7 +154,7 @@ impl SessionManager {
         };
 
         // Example call to env_manager (assuming env_manager is `self.env_manager`)
-        let env_status_from_creation = self.env_manager.create_environment(&env_conf)?; // Assuming this returns EnvironmentStatus
+        let env_status_from_creation = self.env_manager.lock().await.create_environment(&env_conf)?; // Assuming this returns EnvironmentStatus
 
         // Corrected placeholder_env_status initialization
         let _placeholder_env_status = EnvironmentStatus {

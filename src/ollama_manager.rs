@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use crate::config::Config;
+use crate::tui::app::ChatMessage as TuiChatMessage;
 use tracing::{info, error, debug, warn}; // Added tracing macros
 
 #[cfg(feature = "ollama_integration")]
@@ -107,7 +108,7 @@ impl OllamaManager {
     pub async fn generate_response_stream(
         &self,
         model_name_param: String,
-        history: Vec<crate::tui::ChatMessage>, 
+        history: Vec<TuiChatMessage>, 
         system_prompt_override: Option<String>,
     ) -> Result<impl StreamExt<Item = Result<String, String>>> { // Item error type changed to String
         if let Some(client) = &self.client {
@@ -182,7 +183,7 @@ impl OllamaManager {
     pub async fn generate_response_stream(
         &self,
         model_name: String,
-        history: Vec<crate::tui::ChatMessage>,
+        history: Vec<TuiChatMessage>,
         system_prompt_override: Option<String>,
     ) -> Result<futures::stream::Empty<Result<String, String>>> { // Changed OllamaError to String for cfg-disabled case
         let last_prompt = history.last().map_or("N/A", |m| m.content.as_str());

@@ -48,6 +48,8 @@ pub struct InterfaceConfig {
     pub modal_key: String,
     #[serde(default = "default_refresh_interval_ms")]
     pub refresh_interval_ms: u64,
+    #[serde(default = "default_about_modal_readme_lines")]
+    pub about_modal_readme_lines: usize,
 }
 
 fn default_interface_mode() -> String {
@@ -60,12 +62,17 @@ fn default_refresh_interval_ms() -> u64 {
     500
 }
 
+fn default_about_modal_readme_lines() -> usize {
+    10
+}
+
 impl Default for InterfaceConfig {
     fn default() -> Self {
         InterfaceConfig {
             mode: default_interface_mode(),
             modal_key: default_modal_key(),
             refresh_interval_ms: default_refresh_interval_ms(),
+            about_modal_readme_lines: default_about_modal_readme_lines(),
         }
     }
 }

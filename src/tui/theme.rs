@@ -7,6 +7,7 @@ pub struct AppTheme {
     pub primary_foreground: Color,
     pub secondary_foreground: Color,
     pub tertiary_foreground: Color,
+    pub quaternary_foreground: Color,
     pub border_primary: Color,
     pub border_secondary: Color,
     pub border_accent: Color,
@@ -81,6 +82,7 @@ impl Default for AppTheme {
             primary_foreground: Color::White,
             secondary_foreground: Color::Gray, 
             tertiary_foreground: Color::DarkGray,
+            quaternary_foreground: Color::Rgb(255, 107, 107),
             border_primary: Color::DarkGray,
             border_secondary: Color::LightCyan, // Example for active borders
             border_accent: Color::Cyan,

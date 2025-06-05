@@ -3,6 +3,7 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::config::Config;
 use crate::policy::PolicyEngine;
@@ -166,7 +167,7 @@ pub async fn handle_command(
     config: Arc<Config>,
     policy_engine: Arc<PolicyEngine>,
     session_manager: Arc<SessionManager>,
-    env_manager: Arc<EnvironmentManager>,
+    env_manager: Arc<Mutex<EnvironmentManager>>,
     audit_engine: Arc<AuditEngine>,
 ) -> Result<()> {
     match command {
@@ -271,26 +272,29 @@ async fn handle_agent_command(
 async fn handle_vm_command(
     command: VmCommands,
     _config: Arc<Config>,
-    _env_manager: Arc<EnvironmentManager> // Added, marked unused for now
+    env_manager: Arc<Mutex<EnvironmentManager>>, // Added, marked unused for now
 ) -> Result<()> {
     match command {
         VmCommands::List => {
             println!("VM list command");
-            // TODO: Use _env_manager
-            todo!("Implement VM list - requires EnvManager");
+            let env_manager_guard = env_manager.lock().await;
+            let vms = env_manager_guard.list_environments()?;
+            // TODO: Pretty print the VM list
+            println!("Found {} environments:", vms.len());
+            for vm in vms {
+                println!("  - Name: {}, State: {:?}, IP: {:?}, Type: {:?}", vm.name, vm.state, vm.ip_address, vm.env_type);
+            }
         }
         VmCommands::Info { vm_id } => {
-            println!("VM info command: VM_ID: {}", vm_id);
-            // TODO: Use _env_manager
-            todo!("Implement VM info - requires EnvManager");
+            println!("VM info command for: {}", vm_id);
+            // TODO: Implement VM info logic
         }
         VmCommands::Snapshot { vm_id, output } => {
-            println!("VM snapshot command: VM_ID: {}, Output: {:?}", vm_id, output);
-            // TODO: Use _env_manager
-            todo!("Implement VM snapshot - requires EnvManager");
+            println!("VM snapshot command for: {} to file: {:?}", vm_id, output);
+            // TODO: Implement VM snapshot logic
         }
     }
-    // Ok(())
+    Ok(())
 }
 
 async fn handle_log_command(
