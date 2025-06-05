@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEvent},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEvent, MouseEvent, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -659,7 +659,25 @@ impl App {
 
         // Poll for chat stream events
         if let Some(chat_rx) = &mut self.chat_stream_receiver {
+            let mut was_at_bottom_chat = false;
+            let mut new_chat_content_added = false;
+
+            if self.active_view == TuiView::Chat {
+                if let Some(chat_session) = &self.active_chat {
+                    if !chat_session.messages.is_empty() {
+                        if let Some(selected_idx) = self.chat_list_state.selected() {
+                            if selected_idx == chat_session.messages.len() - 1 {
+                                was_at_bottom_chat = true;
+                            }
+                        } else {
+                            was_at_bottom_chat = true; // If nothing selected, new content should scroll to bottom
+                        }
+                    }
+                }
+            }
+
             while let Ok(event) = chat_rx.try_recv() {
+                new_chat_content_added = true; // Any event implies potential change or need to check scroll
                 if let Some(chat_session) = &mut self.active_chat {
                     match event {
                         ChatStreamEvent::Chunk(chunk) => {
@@ -688,37 +706,29 @@ impl App {
 
                                     if let Some(start_think) = new_content.find("<think>") {
                                         if let Some(end_think) = new_content.rfind("</think>") {
-                                            // Ensure <think> is before </think> and it's somewhat structured like a block
                                             if start_think < end_think && new_content.starts_with("<think>") {
-                                                // Extract thought
                                                 thought_text = Some(new_content[start_think + "<think>".len()..end_think].to_string());
-                                                // Get content after </think>
                                                 new_content = new_content[end_think + "</think>".len()..].trim_start().to_string();
                                             }
                                         }
                                     }
                                     last_message.thought = thought_text;
                                     last_message.content = new_content;
-                                    
-                                    // If content became empty after extracting thought, add a small note or leave as is.
-                                    // if last_message.content.is_empty() && last_message.thought.is_some() {
-                                    //     last_message.content = "(Thought processed)".to_string();
-                                    // }
                                 }
                             }
                         }
                     }
                 }
             }
-            // Auto-scroll chat view if active and new content might have arrived
-            if self.active_view == TuiView::Chat {
+            
+            if new_chat_content_added && self.active_view == TuiView::Chat {
                 if let Some(chat_session) = &self.active_chat {
-                    if !chat_session.messages.is_empty() {
-                        // Simplified: always scroll to bottom if chat view is active during tick with events.
-                        // Similar to logs, can be made smarter to respect user scroll position.
+                    if !chat_session.messages.is_empty() && was_at_bottom_chat {
                         self.chat_list_state.select(Some(chat_session.messages.len() - 1));
                     }
                 }
+            } else if self.active_view == TuiView::Chat && self.active_chat.as_ref().map_or(true, |cs| cs.messages.is_empty()) {
+                self.chat_list_state.select(None); // Clear selection if no messages or no active chat
             }
         }
 
@@ -727,6 +737,30 @@ impl App {
             if chat_session.is_streaming {
                 // This flag is now primarily managed by ChatStreamEvents.
                 // Can be used for UI elements like a spinner.
+            }
+        }
+    }
+
+    // New method to handle mouse events
+    pub fn on_mouse_event(&mut self, mouse_event: MouseEvent) {
+        if self.active_view == TuiView::Chat {
+            if let Some(chat_session) = &self.active_chat {
+                if !chat_session.messages.is_empty() {
+                    let num_messages = chat_session.messages.len();
+                    let current_selection = self.chat_list_state.selected().unwrap_or(if num_messages > 0 { num_messages -1 } else { 0 } ); // Default to bottom or 0
+
+                    match mouse_event.kind {
+                        MouseEventKind::ScrollUp => {
+                            let next_selection = if current_selection > 0 { current_selection - 1 } else { 0 };
+                            self.chat_list_state.select(Some(next_selection));
+                        }
+                        MouseEventKind::ScrollDown => {
+                            let next_selection = if current_selection < num_messages - 1 { current_selection + 1 } else { num_messages - 1 };
+                            self.chat_list_state.select(Some(next_selection));
+                        }
+                        _ => {} // Other mouse events like Move, Drag, Down, Up are ignored for now
+                    }
+                }
             }
         }
     }
@@ -783,9 +817,19 @@ fn run_app_loop(
     loop {
         terminal.draw(|f| ui(f, &mut app))?;
         let timeout = tick_rate.checked_sub(last_tick.elapsed()).unwrap_or_else(|| Duration::from_secs(0));
+        
         if crossterm::event::poll(timeout)? {
-            if let CrosstermEvent::Key(key_event) = event::read()? {
-                app.on_key(key_event);
+            match event::read()? {
+                CrosstermEvent::Key(key_event) => {
+                    app.on_key(key_event);
+                }
+                CrosstermEvent::Mouse(mouse_event) => { // Handle Mouse Events
+                    app.on_mouse_event(mouse_event);
+                }
+                CrosstermEvent::Resize(_, _) => { // Handle Resize if needed in the future
+                    // For now, redraw will handle it. May need to recalculate layouts.
+                }
+                _ => {} // Other events like FocusGained/Lost, Paste
             }
         }
         if last_tick.elapsed() >= tick_rate {
