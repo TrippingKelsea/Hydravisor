@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEvent, MouseEvent, MouseEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -138,6 +138,12 @@ pub struct App {
     // This map will hold live edits to system prompts before saving to config
     // It's initialized from app.config and is the source for OllamaModelListWidget display
     editable_ollama_model_prompts: std::collections::HashMap<String, String>,
+    input_bar_scroll: u16, // Scroll offset for the input bar
+    input_bar_last_wrapped_line_count: usize, // For clamping scroll
+    input_bar_visible_height: u16,          // For scroll calculation
+    input_bar_cursor_needs_to_be_visible: bool, // Flag for auto-scroll logic
+    input_cursor_char_idx: usize, // Character index of the cursor in current_input
+    last_input_text_area_width: u16, // Cache for Up/Down arrow navigation
 }
 
 impl App {
@@ -185,6 +191,12 @@ impl App {
             theme: Arc::new(AppTheme::default()), // Initialize theme
             editing_system_prompt_for_model: None,
             editable_ollama_model_prompts: initial_editable_prompts,
+            input_bar_scroll: 0, // Initialize scroll offset
+            input_bar_last_wrapped_line_count: 0,
+            input_bar_visible_height: 1, // Default to 1, will be updated by render
+            input_bar_cursor_needs_to_be_visible: true,
+            input_cursor_char_idx: 0, // Initialize cursor position
+            last_input_text_area_width: 1, // Default, will be updated by render
         };
 
         #[cfg(feature = "ollama_integration")]
@@ -362,8 +374,8 @@ impl App {
         // Need to ensure 'q' doesn't quit if editing_system_prompt_for_model is Some
 
         if self.editing_system_prompt_for_model.is_some() {
-            match key_event.code {
-                KeyCode::Enter => {
+            match key_event {
+                KeyEvent { code: KeyCode::Enter, .. } => {
                     if let Some(model_name) = self.editing_system_prompt_for_model.take() {
                         self.editable_ollama_model_prompts.insert(model_name.clone(), self.current_input.clone());
                         let mut config_to_save = (*self.config).clone();
@@ -382,18 +394,144 @@ impl App {
                         }
                         self.current_input.clear();
                         self.input_mode = InputMode::Normal;
+                        self.input_bar_cursor_needs_to_be_visible = true;
+                        self.input_bar_scroll = 0;
+                        self.input_cursor_char_idx = 0; // Reset cursor position
                     }
                 }
-                KeyCode::Char(c) => self.current_input.push(c),
-                KeyCode::Backspace => { self.current_input.pop(); }
-                KeyCode::Esc => {
+                KeyEvent { code: KeyCode::Char(c), modifiers, .. } if modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT => {
+                    let mut chars: Vec<char> = self.current_input.chars().collect();
+                    if self.input_cursor_char_idx <= chars.len() {
+                        chars.insert(self.input_cursor_char_idx, c);
+                        self.current_input = chars.into_iter().collect();
+                        self.input_cursor_char_idx += 1;
+                    }
+                    self.input_bar_cursor_needs_to_be_visible = true;
+                }
+                KeyEvent { code: KeyCode::Backspace, modifiers: KeyModifiers::NONE, .. } => { 
+                    if self.input_cursor_char_idx > 0 {
+                        let mut chars: Vec<char> = self.current_input.chars().collect();
+                        if self.input_cursor_char_idx <= chars.len() { // Ensure cursor is within actual char bounds
+                            chars.remove(self.input_cursor_char_idx - 1);
+                            self.current_input = chars.into_iter().collect();
+                            self.input_cursor_char_idx -= 1;
+                        }
+                    }
+                    self.input_bar_cursor_needs_to_be_visible = true;
+                }
+                KeyEvent { code: KeyCode::Left, modifiers: KeyModifiers::NONE, .. } => {
+                    if self.input_cursor_char_idx > 0 {
+                        self.input_cursor_char_idx -= 1;
+                        self.input_bar_cursor_needs_to_be_visible = true;
+                    } else {
+                        self.input_bar_cursor_needs_to_be_visible = false;
+                    }
+                }
+                KeyEvent { code: KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {
+                    let char_count = self.current_input.chars().count();
+                    if self.input_cursor_char_idx < char_count {
+                        self.input_cursor_char_idx += 1;
+                        self.input_bar_cursor_needs_to_be_visible = true;
+                    } else {
+                        self.input_bar_cursor_needs_to_be_visible = false;
+                    }
+                }
+                KeyEvent { code: KeyCode::Esc, .. } => {
                     self.editing_system_prompt_for_model = None;
                     self.current_input.clear();
                     self.input_mode = InputMode::Normal;
+                    self.input_bar_cursor_needs_to_be_visible = true;
+                    self.input_bar_scroll = 0;
+                    self.input_cursor_char_idx = 0; // Reset cursor position
                 }
-                _ => {}
+                KeyEvent { code: KeyCode::Up, modifiers: KeyModifiers::NONE, .. } => {
+                    let original_cursor_idx = self.input_cursor_char_idx;
+                    if self.last_input_text_area_width > 0 && !self.current_input.is_empty() {
+                        let wrapped_lines: Vec<String> = textwrap::wrap(&self.current_input, self.last_input_text_area_width as usize).iter().map(|s| s.to_string()).collect();
+                        if wrapped_lines.is_empty() { return; }
+
+                        let mut current_char_idx_abs = 0;
+                        let mut current_wrapped_line_idx = 0;
+                        let mut current_char_col_on_line = 0;
+
+                        for (idx, line_str) in wrapped_lines.iter().enumerate() {
+                            let line_char_len = line_str.chars().count();
+                            if self.input_cursor_char_idx <= current_char_idx_abs + line_char_len {
+                                current_wrapped_line_idx = idx;
+                                current_char_col_on_line = self.input_cursor_char_idx - current_char_idx_abs;
+                                break;
+                            }
+                            current_char_idx_abs += line_char_len;
+                        }
+                         // Handle case where cursor might be at the very end of text, effectively on the last line at its end column.
+                        if self.input_cursor_char_idx == self.current_input.chars().count() && !wrapped_lines.is_empty() {
+                             current_wrapped_line_idx = wrapped_lines.len() - 1;
+                             current_char_col_on_line = wrapped_lines.last().unwrap().chars().count();
+                        }
+
+                        if current_wrapped_line_idx > 0 {
+                            let target_wrapped_line_idx = current_wrapped_line_idx - 1;
+                            let mut new_char_idx_abs = 0;
+                            for i in 0..target_wrapped_line_idx {
+                                new_char_idx_abs += wrapped_lines[i].chars().count();
+                            }
+                            let target_line_actual_len = wrapped_lines[target_wrapped_line_idx].chars().count();
+                            new_char_idx_abs += current_char_col_on_line.min(target_line_actual_len);
+                            self.input_cursor_char_idx = new_char_idx_abs;
+                            self.input_bar_cursor_needs_to_be_visible = true;
+                        }
+                    }
+                    if self.input_cursor_char_idx == original_cursor_idx {
+                        self.input_bar_cursor_needs_to_be_visible = false;
+                    } else {
+                        self.input_bar_cursor_needs_to_be_visible = true;
+                    }
+                }
+                KeyEvent { code: KeyCode::Down, modifiers: KeyModifiers::NONE, .. } => {
+                    let original_cursor_idx = self.input_cursor_char_idx;
+                    if self.last_input_text_area_width > 0 && !self.current_input.is_empty() {
+                        let wrapped_lines: Vec<String> = textwrap::wrap(&self.current_input, self.last_input_text_area_width as usize).iter().map(|s| s.to_string()).collect();
+                        if wrapped_lines.is_empty() || wrapped_lines.len() == 1 { return; }
+
+                        let mut current_char_idx_abs = 0;
+                        let mut current_wrapped_line_idx = 0;
+                        let mut current_char_col_on_line = 0;
+
+                        for (idx, line_str) in wrapped_lines.iter().enumerate() {
+                            let line_char_len = line_str.chars().count();
+                            if self.input_cursor_char_idx <= current_char_idx_abs + line_char_len {
+                                current_wrapped_line_idx = idx;
+                                current_char_col_on_line = self.input_cursor_char_idx - current_char_idx_abs;
+                                break;
+                            }
+                            current_char_idx_abs += line_char_len;
+                        }
+                        if self.input_cursor_char_idx == self.current_input.chars().count() && !wrapped_lines.is_empty() {
+                             current_wrapped_line_idx = wrapped_lines.len() - 1;
+                             current_char_col_on_line = wrapped_lines.last().unwrap().chars().count();
+                        }
+
+                        if current_wrapped_line_idx < wrapped_lines.len() - 1 {
+                            let target_wrapped_line_idx = current_wrapped_line_idx + 1;
+                            let mut new_char_idx_abs = 0;
+                            for i in 0..target_wrapped_line_idx {
+                                new_char_idx_abs += wrapped_lines[i].chars().count();
+                            }
+                            let target_line_actual_len = wrapped_lines[target_wrapped_line_idx].chars().count();
+                            new_char_idx_abs += current_char_col_on_line.min(target_line_actual_len);
+                            self.input_cursor_char_idx = new_char_idx_abs;
+                            self.input_bar_cursor_needs_to_be_visible = true;
+                        }
+                    }
+                    if self.input_cursor_char_idx == original_cursor_idx {
+                        self.input_bar_cursor_needs_to_be_visible = false;
+                    } else {
+                        self.input_bar_cursor_needs_to_be_visible = true;
+                    }
+                }
+                _ => {} // Other keys are currently ignored here
             }
-            return; // Consume keys if editing system prompt
+            return; 
         }
 
         // --- Start: Normal Mode and Chat Editing Mode Logic ---
@@ -401,23 +539,27 @@ impl App {
             InputMode::Normal => {
                 match key_event.code {
                     KeyCode::Char('q') => self.should_quit = true,
-                    KeyCode::Char('e') => { // Edit system prompt
+                    KeyCode::Char('i') => { // Changed from 'e' to 'i'
                         if self.active_view == TuiView::OllamaModelList {
                             #[cfg(feature = "ollama_integration")]
                             if let Some(selected_idx) = self.ollama_model_list_state.selected() {
                                 if let Some(model) = self.ollama_models.get(selected_idx) {
                                     self.editing_system_prompt_for_model = Some(model.name.clone());
                                     self.current_input = self.get_active_system_prompt(&model.name);
+                                    self.input_cursor_char_idx = self.current_input.chars().count(); // Set cursor to end
                                     self.input_mode = InputMode::Editing;
+                                    self.input_bar_cursor_needs_to_be_visible = true; // Ensure view updates
                                 }
                             }
-                        }
-                    }
-                    KeyCode::Char('i') => { // Enter chat input mode
-                        if self.active_view == TuiView::Chat && self.active_chat.is_some() {
-                             // self.editing_system_prompt_for_model is None due to check above
+                        } else if self.active_view == TuiView::Chat && self.active_chat.is_some() {
+                             // This is for entering chat input mode, 'i' was already used here.
+                             // Ensure editing_system_prompt_for_model is None (implicit from flow)
                             self.input_mode = InputMode::Editing;
-                            // current_input is already the buffer for chat, ensure it's clear if needed.
+                            // self.current_input is already the buffer for chat.
+                            // self.input_cursor_char_idx should ideally be at end of current_input if any, or 0.
+                            // For chat, current_input is cleared on send, so 0 is fine when starting fresh.
+                            // If we allow re-editing a non-empty chat input bar before sending, this might need adjustment.
+                            // For now, assuming chat input starts empty or cursor is managed correctly by prior ops.
                         }
                     }
                     KeyCode::BackTab => {
@@ -472,11 +614,14 @@ impl App {
                 }
             }
             InputMode::Editing => {
-                // This is for CHAT INPUT only, system prompt editing is handled above and returns.
-                match key_event.code {
-                    KeyCode::Enter => {
+                // This is for CHAT INPUT only
+                match key_event {
+                    KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, .. } => { // Added NONE modifier
                         if self.active_view == TuiView::Chat {
-                            let prompt_text = self.current_input.drain(..).collect::<String>();
+                            let prompt_text = self.current_input.clone(); // Clone before drain
+                            self.current_input.clear(); // Clear for next input
+                            self.input_cursor_char_idx = 0; // Reset cursor for next input
+
                             if !prompt_text.is_empty() {
                                 if let Some(chat_session) = self.active_chat.as_mut() {
                                     chat_session.messages.push(ChatMessage {
@@ -489,16 +634,16 @@ impl App {
                                     let assistant_model_name = chat_session.model_name.clone();
                                     chat_session.messages.push(ChatMessage {
                                         sender: assistant_model_name.clone(),
-                                        content: String::new(), // Placeholder, will be filled by stream
+                                        content: String::new(), 
                                         timestamp: Local::now().format("%H:%M:%S").to_string(),
                                         thought: None, 
                                     });
                                     chat_session.is_streaming = true;
 
-                                    // Clone necessary data for the async block
                                     let ollama_manager_clone = Arc::clone(&self.ollama_manager);
                                     let model_name = assistant_model_name.clone();
-                                    let messages_for_stream = chat_session.messages.clone(); // Send full history
+                                    // Pass the cloned prompt_text to the stream
+                                    let messages_for_stream = chat_session.messages.clone(); 
                                     let stream_tx = self.chat_stream_sender.clone();
                                     let system_prompt = self.get_active_system_prompt(&model_name);
 
@@ -516,9 +661,9 @@ impl App {
                                                                 break;
                                                             }
                                                         }
-                                                        Err(e_str) => { // e_str is now String
+                                                        Err(e_str) => { 
                                                             error!("Chat stream item error: {}", e_str);
-                                                            if stream_tx.send(ChatStreamEvent::Error(e_str)).is_err() { // Send String
+                                                            if stream_tx.send(ChatStreamEvent::Error(e_str)).is_err() { 
                                                                 error!("Failed to send chat stream error to TUI");
                                                             }
                                                             break; 
@@ -529,32 +674,71 @@ impl App {
                                                     error!("Failed to send chat stream completion to TUI");
                                                 }
                                             }
-                                            Err(e) => { // This 'e' is anyhow::Error
+                                            Err(e) => { 
                                                 error!("Failed to start chat stream: {:?}", e);
-                                                // Send the error message string to the TUI
-                                                if stream_tx.send(ChatStreamEvent::Error(e.to_string())).is_err() { // Send String
+                                                if stream_tx.send(ChatStreamEvent::Error(e.to_string())).is_err() { 
                                                     error!("Failed to send initial chat stream error to TUI");
                                                 }
                                             }
                                         }
                                     });
                                     
-                                    // Auto-scroll to the bottom of the chat view
                                     if let Some(chat_session) = &self.active_chat {
                                         if !chat_session.messages.is_empty() {
                                             self.chat_list_state.select(Some(chat_session.messages.len() - 1));
                                         }
                                     }
+                                    self.input_bar_cursor_needs_to_be_visible = true; 
+                                    self.input_bar_scroll = 0; 
                                 }
                             }
                         }
                     }
-                    KeyCode::Char(c) => self.current_input.push(c),
-                    KeyCode::Backspace => { self.current_input.pop(); }
-                    KeyCode::Esc => {
-                        self.input_mode = InputMode::Normal;
+                    KeyEvent { code: KeyCode::Char(c), modifiers, .. } if modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT => {
+                        let mut chars: Vec<char> = self.current_input.chars().collect();
+                        if self.input_cursor_char_idx <= chars.len() {
+                             chars.insert(self.input_cursor_char_idx, c);
+                             self.current_input = chars.into_iter().collect();
+                             self.input_cursor_char_idx += 1;
+                        }
+                        self.input_bar_cursor_needs_to_be_visible = true;
                     }
-                    _ => {}
+                    KeyEvent { code: KeyCode::Backspace, modifiers: KeyModifiers::NONE, .. } => { 
+                        if self.input_cursor_char_idx > 0 {
+                            let mut chars: Vec<char> = self.current_input.chars().collect();
+                            if self.input_cursor_char_idx <= chars.len() {
+                                chars.remove(self.input_cursor_char_idx - 1);
+                                self.current_input = chars.into_iter().collect();
+                                self.input_cursor_char_idx -= 1;
+                            }
+                        }
+                        self.input_bar_cursor_needs_to_be_visible = true;
+                    }
+                    KeyEvent { code: KeyCode::Left, modifiers: KeyModifiers::NONE, .. } => {
+                        if self.input_cursor_char_idx > 0 {
+                            self.input_cursor_char_idx -= 1;
+                            self.input_bar_cursor_needs_to_be_visible = true;
+                        } else {
+                            self.input_bar_cursor_needs_to_be_visible = false;
+                        }
+                    }
+                    KeyEvent { code: KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {
+                        let char_count = self.current_input.chars().count();
+                        if self.input_cursor_char_idx < char_count {
+                            self.input_cursor_char_idx += 1;
+                            self.input_bar_cursor_needs_to_be_visible = true;
+                        } else {
+                            self.input_bar_cursor_needs_to_be_visible = false;
+                        }
+                    }
+                    KeyEvent { code: KeyCode::Esc, .. } => {
+                        self.input_mode = InputMode::Normal;
+                        // self.current_input.clear(); // Optionally clear
+                        // self.input_cursor_char_idx = 0; // Optionally reset
+                        // self.input_bar_cursor_needs_to_be_visible = true; 
+                        // self.input_bar_scroll = 0; 
+                    }
+                    _ => {} // Other keys are currently ignored here
                 }
             }
         }
@@ -752,6 +936,26 @@ impl App {
 
     // New method to handle mouse events
     pub fn on_mouse_event(&mut self, mouse_event: MouseEvent) {
+        let is_editing_input_bar = self.input_mode == InputMode::Editing || self.editing_system_prompt_for_model.is_some();
+
+        if is_editing_input_bar {
+            match mouse_event.kind {
+                MouseEventKind::ScrollUp => {
+                    self.input_bar_scroll = self.input_bar_scroll.saturating_sub(1);
+                    self.input_bar_cursor_needs_to_be_visible = false;
+                    return; // Consume event for input bar
+                }
+                MouseEventKind::ScrollDown => {
+                    self.input_bar_scroll = self.input_bar_scroll.saturating_add(1);
+                    self.input_bar_cursor_needs_to_be_visible = false;
+                    return; // Consume event for input bar
+                }
+                _ => {} // Other mouse events for input bar (e.g. click) not handled yet
+            }
+        }
+
+        // Existing mouse scroll logic for chat view (ensure it doesn't conflict if chat is active view AND editing input bar)
+        // The return statements above should prevent conflict for scroll events.
         if self.active_view == TuiView::Chat {
             if let Some(chat_session) = &self.active_chat {
                 if !chat_session.messages.is_empty() {
@@ -912,4 +1116,6 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 // - Implement scrolling for VM list, Ollama model list, and chat message list.
 // - Add more robust error handling and display for TUI (e.g., a status message area).
 // - Refine UI layout and styling.
+// - Complete other TODOs throughout the file. 
+// - Complete other TODOs throughout the file. 
 // - Complete other TODOs throughout the file. 
