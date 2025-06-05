@@ -51,7 +51,7 @@ use self::widgets::new_vm_popup::NewVmPopupWidget;
 
 // Define different views for the TUI
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TuiView {
+pub enum AppView {
     VmList,
     OllamaModelList,
     Chat,
@@ -123,7 +123,7 @@ pub struct App {
     audit_engine: Arc<AuditEngine>,
     ollama_manager: Arc<OllamaManager>,
 
-    active_view: TuiView,
+    active_view: AppView,
     input_mode: InputMode,
     current_input: String,
     active_chat: Option<ChatSession>,
@@ -198,7 +198,7 @@ impl App {
             env_manager,
             audit_engine,
             ollama_manager: Arc::clone(&ollama_manager),
-            active_view: TuiView::VmList,
+            active_view: AppView::VmList,
             input_mode: InputMode::Normal,
             current_input: String::new(),
             active_chat: None,
@@ -298,7 +298,7 @@ impl App {
     pub fn on_key(&mut self, key_event: KeyEvent) {
         let mut event_consumed = false;
 
-        if self.active_view == TuiView::Logs && self.input_mode == InputMode::Normal {
+        if self.active_view == AppView::Logs && self.input_mode == InputMode::Normal {
             let current_selection = self.log_list_state.selected();
             let num_entries = self.log_entries.len();
 
@@ -360,7 +360,7 @@ impl App {
         }
 
         // Add chat view scrolling logic here
-        if self.active_view == TuiView::Chat && self.input_mode == InputMode::Normal {
+        if self.active_view == AppView::Chat && self.input_mode == InputMode::Normal {
             if let Some(chat_session) = &self.active_chat {
                 if !chat_session.messages.is_empty() {
                     let current_selection = self.chat_list_state.selected().unwrap_or(0);
@@ -564,7 +564,7 @@ impl App {
                 match key_event.code {
                     KeyCode::Char('q') => self.should_quit = true,
                     KeyCode::Char('i') => { // Changed from 'e' to 'i'
-                        if self.active_view == TuiView::OllamaModelList {
+                        if self.active_view == AppView::OllamaModelList {
                             #[cfg(feature = "ollama_integration")]
                             if let Some(selected_idx) = self.ollama_model_list_state.selected() {
                                 if let Some(model) = self.ollama_models.get(selected_idx) {
@@ -575,7 +575,7 @@ impl App {
                                     self.input_bar_cursor_needs_to_be_visible = true; // Ensure view updates
                                 }
                             }
-                        } else if self.active_view == TuiView::Chat || self.editing_system_prompt_for_model.is_none() { // General case for chat or if not system prompt
+                        } else if self.active_view == AppView::Chat || self.editing_system_prompt_for_model.is_none() { // General case for chat or if not system prompt
                              // This is for entering chat input mode, 'i' was already used here.
                              // Ensure editing_system_prompt_for_model is None (implicit from flow or check above)
                             self.input_mode = InputMode::Editing;
@@ -586,10 +586,10 @@ impl App {
                     }
                     KeyCode::BackTab => {
                         self.active_view = match self.active_view {
-                            TuiView::VmList => TuiView::Logs,
-                            TuiView::OllamaModelList => TuiView::VmList,
-                            TuiView::Chat => TuiView::OllamaModelList,
-                            TuiView::Logs => TuiView::Chat,
+                            AppView::VmList => AppView::Logs,
+                            AppView::OllamaModelList => AppView::VmList,
+                            AppView::Chat => AppView::OllamaModelList,
+                            AppView::Logs => AppView::Chat,
                         };
                         self.vm_list_state.select(if self.vms.is_empty() { None } else { Some(0) });
                         #[cfg(feature = "ollama_integration")]
@@ -597,27 +597,27 @@ impl App {
                     }
                     KeyCode::Tab => {
                         self.active_view = match self.active_view {
-                            TuiView::VmList => TuiView::OllamaModelList,
-                            TuiView::OllamaModelList => TuiView::Chat,
-                            TuiView::Chat => TuiView::Logs,
-                            TuiView::Logs => TuiView::VmList,
+                            AppView::VmList => AppView::OllamaModelList,
+                            AppView::OllamaModelList => AppView::Chat,
+                            AppView::Chat => AppView::Logs,
+                            AppView::Logs => AppView::VmList,
                         };
                         self.vm_list_state.select(if self.vms.is_empty() { None } else { Some(0) });
                         #[cfg(feature = "ollama_integration")]
                         self.ollama_model_list_state.select(if self.ollama_models.is_empty() { None } else { Some(0) });
                     }
                     KeyCode::Down => match self.active_view {
-                        TuiView::VmList => self.select_next_item_in_vm_list(),
-                        TuiView::OllamaModelList => self.select_next_item_in_ollama_list(),
+                        AppView::VmList => self.select_next_item_in_vm_list(),
+                        AppView::OllamaModelList => self.select_next_item_in_ollama_list(),
                         _ => {} 
                     },
                     KeyCode::Up => match self.active_view {
-                        TuiView::VmList => self.select_previous_item_in_vm_list(),
-                        TuiView::OllamaModelList => self.select_previous_item_in_ollama_list(),
+                        AppView::VmList => self.select_previous_item_in_vm_list(),
+                        AppView::OllamaModelList => self.select_previous_item_in_ollama_list(),
                         _ => {} 
                     },
                     KeyCode::Enter => { // Select Ollama model to start chat
-                        if self.active_view == TuiView::OllamaModelList {
+                        if self.active_view == AppView::OllamaModelList {
                             #[cfg(feature = "ollama_integration")]
                             if let Some(selected_idx) = self.ollama_model_list_state.selected() {
                                 if let Some(model) = self.ollama_models.get(selected_idx) {
@@ -626,7 +626,7 @@ impl App {
                                         messages: Vec::new(),
                                         is_streaming: false,
                                     });
-                                    self.active_view = TuiView::Chat;
+                                    self.active_view = AppView::Chat;
                                     self.current_input.clear(); 
                                 }
                             }
@@ -653,7 +653,7 @@ impl App {
                 // This is for CHAT INPUT only
                 match key_event {
                     KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, .. } => { // Added NONE modifier
-                        if self.active_view == TuiView::Chat {
+                        if self.active_view == AppView::Chat {
                             let prompt_text = self.current_input.clone(); // Clone before drain
                             self.current_input.clear(); // Clear for next input
                             self.input_cursor_char_idx = 0; // Reset cursor for next input
@@ -830,7 +830,7 @@ impl App {
             let mut was_at_bottom = false;
             let old_len = self.log_entries.len();
 
-            if self.active_view == TuiView::Logs && !self.log_entries.is_empty() {
+            if self.active_view == AppView::Logs && !self.log_entries.is_empty() {
                 if let Some(selected_idx) = self.log_list_state.selected() {
                     if selected_idx == old_len - 1 {
                         was_at_bottom = true;
@@ -858,7 +858,7 @@ impl App {
                 }
             }
 
-            if new_logs_added_count > 0 && self.active_view == TuiView::Logs {
+            if new_logs_added_count > 0 && self.active_view == AppView::Logs {
                 if was_at_bottom {
                     self.log_list_state.select(Some(self.log_entries.len() - 1));
                 } else {
@@ -870,7 +870,7 @@ impl App {
                     // The current drain logic selects None if selection was in drained part.
                     // If logs were added and not at bottom, the selection index remains, but relative position shifts.
                 }
-            } else if self.active_view == TuiView::Logs && self.log_entries.is_empty() {
+            } else if self.active_view == AppView::Logs && self.log_entries.is_empty() {
                  self.log_list_state.select(None); // Clear selection if no logs
             }
         }
@@ -880,7 +880,7 @@ impl App {
             let mut was_at_bottom_chat = false;
             let mut new_chat_content_added = false;
 
-            if self.active_view == TuiView::Chat {
+            if self.active_view == AppView::Chat {
                 if let Some(chat_session) = &self.active_chat {
                     if !chat_session.messages.is_empty() {
                         if let Some(selected_idx) = self.chat_list_state.selected() {
@@ -948,13 +948,13 @@ impl App {
                 }
             }
             
-            if new_chat_content_added && self.active_view == TuiView::Chat {
+            if new_chat_content_added && self.active_view == AppView::Chat {
                 if let Some(chat_session) = &self.active_chat {
                     if !chat_session.messages.is_empty() && was_at_bottom_chat {
                         self.chat_list_state.select(Some(chat_session.messages.len() - 1));
                     }
                 }
-            } else if self.active_view == TuiView::Chat && self.active_chat.as_ref().map_or(true, |cs| cs.messages.is_empty()) {
+            } else if self.active_view == AppView::Chat && self.active_chat.as_ref().map_or(true, |cs| cs.messages.is_empty()) {
                 self.chat_list_state.select(None); // Clear selection if no messages or no active chat
             }
         }
@@ -990,7 +990,7 @@ impl App {
 
         // Existing mouse scroll logic for chat view (ensure it doesn't conflict if chat is active view AND editing input bar)
         // The return statements above should prevent conflict for scroll events.
-        if self.active_view == TuiView::Chat {
+        if self.active_view == AppView::Chat {
             if let Some(chat_session) = &self.active_chat {
                 if !chat_session.messages.is_empty() {
                     let num_messages = chat_session.messages.len();
@@ -1202,16 +1202,16 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
     let main_content_area = main_layout_chunks[1];
 
     match app.active_view {
-        TuiView::VmList => {
+        AppView::VmList => {
             VmListWidget::render(f, app, main_content_area);
         }
-        TuiView::OllamaModelList => {
+        AppView::OllamaModelList => {
             OllamaModelListWidget::render(f, app, main_content_area);
         }
-        TuiView::Chat => {
+        AppView::Chat => {
             ChatWidget::render(f, app, main_content_area);
         }
-        TuiView::Logs => {
+        AppView::Logs => {
             LogsWidget::render(f, app, main_content_area);
         }
     }

@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 use chrono::Local;
-use crate::tui::{App, InputMode};
+use crate::tui::{App, InputMode, AppView};
 
 pub struct StatusBarWidget;
 
@@ -49,9 +49,23 @@ impl StatusBarWidget {
         
         f.render_widget(Paragraph::new(status_spans_left).style(status_bar_style), status_bar_layout[0]);
 
-        let status_text_right = Local::now().format("%H:%M:%S").to_string();
+        let mut status_spans_right = vec![];
+        if app.active_view == AppView::VmList {
+            let libvirt_connected = app.env_manager.is_libvirt_connected();
+            let (status_text, status_style) = if libvirt_connected {
+                ("Connected", Style::default().fg(theme.success_text))
+            } else {
+                ("Disconnected", Style::default().fg(theme.error_text))
+            };
+            status_spans_right.push(Span::styled("Libvirt: ", status_bar_style));
+            status_spans_right.push(Span::styled(status_text, status_style));
+            status_spans_right.push(Span::raw(" | "));
+        }
+        
+        status_spans_right.push(Span::from(Local::now().format("%H:%M:%S").to_string()));
+
         f.render_widget(
-            Paragraph::new(status_text_right)
+            Paragraph::new(Line::from(status_spans_right))
                 .style(status_bar_style)
                 .alignment(Alignment::Right),
             status_bar_layout[1]

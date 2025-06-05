@@ -25,7 +25,7 @@ impl InputBarWidget {
                 Span::styled(model_name.clone(), theme.input_bar_title.patch(Style::default().add_modifier(Modifier::BOLD))),
                 Span::styled(":", theme.input_bar_title),
             ])
-        } else if app.active_view == crate::tui::TuiView::Chat && app.active_chat.is_some() && is_editing_mode {
+        } else if app.active_view == crate::tui::AppView::Chat && app.active_chat.is_some() && is_editing_mode {
             Line::from(Span::styled("Chat Input (Esc: Normal Mode):", theme.input_bar_title))
         } else {
             Line::from(Span::styled("Input:", theme.input_bar_title)) 

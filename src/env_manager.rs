@@ -78,6 +78,8 @@ pub struct EnvironmentManager {
     // config: EnvManagerConfig, // Derived from main Config
     #[cfg(feature = "libvirt_integration")]
     libvirt_conn: Option<Connect>,
+    #[cfg(feature = "libvirt_integration")]
+    pub libvirt_connected: bool,
     // active_environments: Mutex<HashMap<String, EnvironmentStatus>>,
     // containerd_client: Option<ContainerdClient>, // If containerd feature enabled
 }
@@ -85,21 +87,21 @@ pub struct EnvironmentManager {
 impl EnvironmentManager {
     pub fn new(app_config: &Config) -> Result<Self> {
         #[cfg(feature = "libvirt_integration")]
-        let libvirt_conn = match Connect::open(Some("qemu:///system")) {
+        let (libvirt_conn, libvirt_connected) = match Connect::open(Some("qemu:///system")) {
             Ok(conn) => {
                 println!("Successfully connected to libvirt daemon (qemu:///system).");
-                Some(conn)
+                (Some(conn), true)
             }
             Err(e) => {
                 eprintln!(
                     "Failed to connect to libvirt (qemu:///system): {}. Live VM data will not be available.",
                     e
                 );
-                None
+                (None, false)
             }
         };
         #[cfg(not(feature = "libvirt_integration"))]
-        let libvirt_conn: Option<Connect> = None; // Ensure libvirt_conn is defined even if feature is off
+        let (libvirt_conn, libvirt_connected): (Option<Connect>, bool) = (None, false); // Ensure libvirt_conn is defined even if feature is off
 
 
         println!(
@@ -111,7 +113,19 @@ impl EnvironmentManager {
         Ok(EnvironmentManager {
             #[cfg(feature = "libvirt_integration")]
             libvirt_conn,
+            #[cfg(feature = "libvirt_integration")]
+            libvirt_connected,
         })
+    }
+
+    #[cfg(feature = "libvirt_integration")]
+    pub fn is_libvirt_connected(&self) -> bool {
+        self.libvirt_connected
+    }
+
+    #[cfg(not(feature = "libvirt_integration"))]
+    pub fn is_libvirt_connected(&self) -> bool {
+        false
     }
 
     pub fn create_environment(&self, env_config: &EnvironmentConfig) -> Result<EnvironmentStatus> {
