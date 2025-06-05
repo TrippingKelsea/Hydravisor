@@ -422,19 +422,15 @@ impl App {
                 KeyEvent { code: KeyCode::Left, modifiers: KeyModifiers::NONE, .. } => {
                     if self.input_cursor_char_idx > 0 {
                         self.input_cursor_char_idx -= 1;
-                        self.input_bar_cursor_needs_to_be_visible = true;
-                    } else {
-                        self.input_bar_cursor_needs_to_be_visible = false;
                     }
+                    self.input_bar_cursor_needs_to_be_visible = true; // Always true
                 }
                 KeyEvent { code: KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {
                     let char_count = self.current_input.chars().count();
                     if self.input_cursor_char_idx < char_count {
                         self.input_cursor_char_idx += 1;
-                        self.input_bar_cursor_needs_to_be_visible = true;
-                    } else {
-                        self.input_bar_cursor_needs_to_be_visible = false;
                     }
+                    self.input_bar_cursor_needs_to_be_visible = true; // Always true
                 }
                 KeyEvent { code: KeyCode::Esc, .. } => {
                     self.editing_system_prompt_for_model = None;
@@ -478,14 +474,10 @@ impl App {
                             let target_line_actual_len = wrapped_lines[target_wrapped_line_idx].chars().count();
                             new_char_idx_abs += current_char_col_on_line.min(target_line_actual_len);
                             self.input_cursor_char_idx = new_char_idx_abs;
-                            self.input_bar_cursor_needs_to_be_visible = true;
                         }
                     }
-                    if self.input_cursor_char_idx == original_cursor_idx {
-                        self.input_bar_cursor_needs_to_be_visible = false;
-                    } else {
-                        self.input_bar_cursor_needs_to_be_visible = true;
-                    }
+                    // Always set to true after Up arrow, assuming cursor might have moved or view needs check
+                    self.input_bar_cursor_needs_to_be_visible = true; 
                 }
                 KeyEvent { code: KeyCode::Down, modifiers: KeyModifiers::NONE, .. } => {
                     let original_cursor_idx = self.input_cursor_char_idx;
@@ -520,14 +512,10 @@ impl App {
                             let target_line_actual_len = wrapped_lines[target_wrapped_line_idx].chars().count();
                             new_char_idx_abs += current_char_col_on_line.min(target_line_actual_len);
                             self.input_cursor_char_idx = new_char_idx_abs;
-                            self.input_bar_cursor_needs_to_be_visible = true;
                         }
                     }
-                    if self.input_cursor_char_idx == original_cursor_idx {
-                        self.input_bar_cursor_needs_to_be_visible = false;
-                    } else {
-                        self.input_bar_cursor_needs_to_be_visible = true;
-                    }
+                    // Always set to true after Down arrow
+                    self.input_bar_cursor_needs_to_be_visible = true;
                 }
                 _ => {} // Other keys are currently ignored here
             }
@@ -551,15 +539,13 @@ impl App {
                                     self.input_bar_cursor_needs_to_be_visible = true; // Ensure view updates
                                 }
                             }
-                        } else if self.active_view == TuiView::Chat && self.active_chat.is_some() {
+                        } else if self.active_view == TuiView::Chat || self.editing_system_prompt_for_model.is_none() { // General case for chat or if not system prompt
                              // This is for entering chat input mode, 'i' was already used here.
-                             // Ensure editing_system_prompt_for_model is None (implicit from flow)
+                             // Ensure editing_system_prompt_for_model is None (implicit from flow or check above)
                             self.input_mode = InputMode::Editing;
-                            // self.current_input is already the buffer for chat.
-                            // self.input_cursor_char_idx should ideally be at end of current_input if any, or 0.
-                            // For chat, current_input is cleared on send, so 0 is fine when starting fresh.
-                            // If we allow re-editing a non-empty chat input bar before sending, this might need adjustment.
-                            // For now, assuming chat input starts empty or cursor is managed correctly by prior ops.
+                            // Set cursor to end of current input, which might be empty or contain partially typed message
+                            self.input_cursor_char_idx = self.current_input.chars().count();
+                            self.input_bar_cursor_needs_to_be_visible = true; // Ensure scroll visibility updates
                         }
                     }
                     KeyCode::BackTab => {
@@ -717,26 +703,22 @@ impl App {
                     KeyEvent { code: KeyCode::Left, modifiers: KeyModifiers::NONE, .. } => {
                         if self.input_cursor_char_idx > 0 {
                             self.input_cursor_char_idx -= 1;
-                            self.input_bar_cursor_needs_to_be_visible = true;
-                        } else {
-                            self.input_bar_cursor_needs_to_be_visible = false;
                         }
+                        self.input_bar_cursor_needs_to_be_visible = true; // Always true
                     }
                     KeyEvent { code: KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {
                         let char_count = self.current_input.chars().count();
                         if self.input_cursor_char_idx < char_count {
                             self.input_cursor_char_idx += 1;
-                            self.input_bar_cursor_needs_to_be_visible = true;
-                        } else {
-                            self.input_bar_cursor_needs_to_be_visible = false;
                         }
+                        self.input_bar_cursor_needs_to_be_visible = true; // Always true
                     }
                     KeyEvent { code: KeyCode::Esc, .. } => {
                         self.input_mode = InputMode::Normal;
                         // self.current_input.clear(); // Optionally clear
                         // self.input_cursor_char_idx = 0; // Optionally reset
-                        // self.input_bar_cursor_needs_to_be_visible = true; 
-                        // self.input_bar_scroll = 0; 
+                        self.input_bar_cursor_needs_to_be_visible = true; 
+                        self.input_bar_scroll = 0; // Reset scroll when exiting edit mode for chat
                     }
                     _ => {} // Other keys are currently ignored here
                 }

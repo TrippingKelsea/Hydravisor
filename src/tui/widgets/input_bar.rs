@@ -11,21 +11,22 @@ use textwrap;
 
 pub struct InputBarWidget;
 
-const CURSOR_CHAR_STR: &str = "|"; // Changed to line cursor
-const CURSOR_CHAR: char = '|';   // Changed to line cursor
+const CURSOR_CHAR: char = '|';
 
 impl InputBarWidget {
     pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
         let theme = &app.theme;
 
+        let is_editing_mode = app.input_mode == InputMode::Editing || app.editing_system_prompt_for_model.is_some();
+        
         let title = if let Some(model_name) = &app.editing_system_prompt_for_model {
             Line::from(vec![
                 Span::styled("Editing System Prompt for ", theme.input_bar_title),
                 Span::styled(model_name.clone(), theme.input_bar_title.patch(Style::default().add_modifier(Modifier::BOLD))),
-                Span::styled(":", theme.input_bar_title), // Removed Ctrl+Up/Down mention
+                Span::styled(":", theme.input_bar_title),
             ])
-        } else if app.active_view == crate::tui::TuiView::Chat && app.active_chat.is_some() && app.input_mode == InputMode::Editing {
-            Line::from(Span::styled("Chat Input (Esc: Normal Mode):", theme.input_bar_title)) // Removed Ctrl+Up/Down mention
+        } else if app.active_view == crate::tui::TuiView::Chat && app.active_chat.is_some() && is_editing_mode {
+            Line::from(Span::styled("Chat Input (Esc: Normal Mode):", theme.input_bar_title))
         } else {
             Line::from(Span::styled("Input:", theme.input_bar_title)) 
         };
@@ -33,87 +34,69 @@ impl InputBarWidget {
         let input_block = Block::default()
             .borders(Borders::ALL)
             .title(title)
-            .border_style(Style::default().fg(if app.input_mode == InputMode::Editing || app.editing_system_prompt_for_model.is_some() {
+            .border_style(Style::default().fg(if is_editing_mode {
                 theme.border_accent 
             } else {
                 theme.border_secondary
             }));
         
         let text_area_width = area.width.saturating_sub(2).max(1); 
-        app.last_input_text_area_width = text_area_width; // Cache the width
+        app.last_input_text_area_width = text_area_width;
         app.input_bar_visible_height = area.height.saturating_sub(2).max(1); 
 
-        let is_editing_mode = app.input_mode == InputMode::Editing || app.editing_system_prompt_for_model.is_some();
-        
-        let text_for_wrapping: String;
-        let cursor_char_actual_idx_in_text_for_wrapping: usize; // Actual index of CURSOR_CHAR in text_for_wrapping
-
-        if is_editing_mode {
+        // 1. Create the text to be displayed and wrapped, with the cursor character inserted.
+        let text_for_wrapping = if is_editing_mode {
             let mut current_chars: Vec<char> = app.current_input.chars().collect();
-            // app.input_cursor_char_idx is the logical position in app.current_input
-            // This becomes the actual index of CURSOR_CHAR when inserted.
-            cursor_char_actual_idx_in_text_for_wrapping = app.input_cursor_char_idx.min(current_chars.len());
-            current_chars.insert(cursor_char_actual_idx_in_text_for_wrapping, CURSOR_CHAR);
-            text_for_wrapping = current_chars.into_iter().collect::<String>();
+            let cursor_pos = app.input_cursor_char_idx.min(current_chars.len());
+            current_chars.insert(cursor_pos, CURSOR_CHAR);
+            current_chars.into_iter().collect::<String>()
         } else {
-            text_for_wrapping = app.current_input.clone();
-            cursor_char_actual_idx_in_text_for_wrapping = 0; // Not used if not editing, but provide a default
-        }
-
-        let wrapped_lines_as_strings: Vec<String> = textwrap::wrap(&text_for_wrapping, text_area_width as usize)
+            app.current_input.clone()
+        };
+        
+        // 2. Wrap the text. This is the single source of truth for all calculations.
+        let wrapped_lines: Vec<String> = textwrap::wrap(&text_for_wrapping, text_area_width as usize)
             .iter()
             .map(|s| s.to_string())
             .collect();
-        
-        app.input_bar_last_wrapped_line_count = wrapped_lines_as_strings.len();
+        app.input_bar_last_wrapped_line_count = wrapped_lines.len();
 
+        // 3. Find the cursor's line and adjust scroll if needed.
         if app.input_bar_cursor_needs_to_be_visible && is_editing_mode {
-            let mut char_count_so_far = 0;
-            let mut calculated_cursor_line = 0; 
-
-            if !wrapped_lines_as_strings.is_empty() {
-                for (i, line_string) in wrapped_lines_as_strings.iter().enumerate() {
-                    let line_char_len = line_string.chars().count();
-                    
-                    // Check if the cursor_char_actual_idx_in_text_for_wrapping falls within this line's span
-                    // The span is [char_count_so_far, char_count_so_far + line_char_len)
-                    if cursor_char_actual_idx_in_text_for_wrapping >= char_count_so_far && 
-                       cursor_char_actual_idx_in_text_for_wrapping < char_count_so_far + line_char_len {
-                        calculated_cursor_line = i;
-                        break; 
-                    }
-                    // Edge case: if cursor is at the very end of text_for_wrapping, and this is the last line string
-                    if i == wrapped_lines_as_strings.len() - 1 && 
-                       cursor_char_actual_idx_in_text_for_wrapping == char_count_so_far + line_char_len {
-                        calculated_cursor_line = i;
-                        break;
-                    }
-                    char_count_so_far += line_char_len;
-                }
-            } else { // No wrapped lines (e.g. text_for_wrapping is empty)
-                calculated_cursor_line = 0;
-            }
+            // Find the line containing the cursor character.
+            let mut calculated_cursor_line = wrapped_lines
+                .iter()
+                .position(|line| line.contains(CURSOR_CHAR))
+                .unwrap_or(0); // Default to line 0 if not found, though it always should be.
             
-            // Ensure calculated_cursor_line is valid if lines exist
-            if !wrapped_lines_as_strings.is_empty() {
-                calculated_cursor_line = calculated_cursor_line.min(wrapped_lines_as_strings.len() -1);
+            // Ensure the calculated line is valid, especially for an empty input which might result in an empty `wrapped_lines`.
+            if !wrapped_lines.is_empty() {
+                calculated_cursor_line = calculated_cursor_line.min(wrapped_lines.len().saturating_sub(1));
             }
 
+            // "Scroll into view" logic.
             if app.input_bar_visible_height > 0 {
-                let desired_scroll_top = calculated_cursor_line
-                    .saturating_sub((app.input_bar_visible_height as usize).saturating_sub(1));
-                app.input_bar_scroll = desired_scroll_top as u16;
+                let current_scroll_top = app.input_bar_scroll as usize;
+                let current_scroll_bottom = current_scroll_top + (app.input_bar_visible_height as usize).saturating_sub(1);
+
+                if calculated_cursor_line < current_scroll_top {
+                    app.input_bar_scroll = calculated_cursor_line as u16;
+                } else if calculated_cursor_line > current_scroll_bottom {
+                    app.input_bar_scroll = (calculated_cursor_line.saturating_sub(app.input_bar_visible_height.saturating_sub(1) as usize)) as u16;
+                }
             } else {
                 app.input_bar_scroll = 0;
             }
             app.input_bar_cursor_needs_to_be_visible = false; 
         }
 
-        let max_scroll = (app.input_bar_last_wrapped_line_count
-            .saturating_sub(app.input_bar_visible_height as usize)) as u16;
+        // 4. Clamp scroll to the maximum possible value based on the final wrapped lines.
+        let max_scroll = (app.input_bar_last_wrapped_line_count as u16)
+            .saturating_sub(app.input_bar_visible_height);
         app.input_bar_scroll = app.input_bar_scroll.min(max_scroll);
         
-        let display_lines: Vec<Line> = wrapped_lines_as_strings
+        // 5. Render the paragraph.
+        let display_lines: Vec<Line> = wrapped_lines
             .iter()
             .map(|s| Line::from(s.as_str()))
             .collect();
