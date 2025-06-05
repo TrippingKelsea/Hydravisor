@@ -38,7 +38,7 @@ textwrap = "0.16" # Added for better text wrapping
 # aws-sdk-bedrockruntime = { version = "1.0", optional = true } # For Bedrock
 
 [features]
-default = ["libvirt_integration"] # Make libvirt_integration a default feature
+default = ["libvirt_integration", "ollama_integration"] # Make libvirt_integration a default feature
 libvirt_integration = ["dep:virt"] # Feature to enable libvirt integration
 dummy_env_data = [] # New feature for enabling dummy VM data
 ollama_integration = ["dep:ollama-rs"] # Feature to enable Ollama integration

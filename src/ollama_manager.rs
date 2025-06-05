@@ -10,9 +10,8 @@ use ollama_rs::{
     Ollama,
     models::LocalModel,
     generation::chat::{ChatMessage, ChatMessageResponse, MessageRole}, // Import MessageRole
-    generation::chat::request::ChatMessageRequest,    
-    error::OllamaError,
-    reqwest, // Import the re-exported reqwest module
+    generation::chat::request::ChatMessageRequest,
+    // ollama_rs::error::OllamaError is no longer used directly here
 };
 
 #[cfg(feature = "ollama_integration")]
@@ -41,6 +40,11 @@ impl Default for OllamaManager {
             OllamaManager { _private: () }
         }
     }
+}
+
+#[cfg(feature = "ollama_integration")] // Helper function also needs this cfg
+fn map_stream_item_error(_err: ()) -> String { // Return String instead of OllamaError
+    "Error processing stream item from Ollama".to_string()
 }
 
 impl OllamaManager {
@@ -105,7 +109,7 @@ impl OllamaManager {
         model_name_param: String,
         history: Vec<crate::tui::ChatMessage>, 
         system_prompt_override: Option<String>,
-    ) -> Result<impl StreamExt<Item = Result<String, ollama_rs::error::OllamaError>>> {
+    ) -> Result<impl StreamExt<Item = Result<String, String>>> { // Item error type changed to String
         if let Some(client) = &self.client {
             let mut ollama_messages: Vec<ChatMessage> = Vec::new();
 
@@ -156,10 +160,7 @@ impl OllamaManager {
                     debug!("Successfully started chat messages stream for model: {}", model_name_param);
                     Ok(ollama_stream.map(|result_chat_message_response: Result<ChatMessageResponse, ()>| {
                         result_chat_message_response
-                            .map_err(|_| ollama_rs::error::OllamaError::APIError { // Use fully qualified path
-                                error_message: "Error processing stream item".to_string(),
-                                status_code: reqwest::StatusCode::INTERNAL_SERVER_ERROR, // Use StatusCode via imported reqwest
-                            })
+                            .map_err(map_stream_item_error) // This now returns String
                             .map(|chat_message_response| {
                                 chat_message_response.message.map_or_else(String::new, |chat_msg| chat_msg.content)
                         })

@@ -14,8 +14,11 @@ use ratatui::{
 };
 use std::{io::{self, Stdout}, sync::Arc, time::{Duration, Instant}};
 use chrono::Local;
-use tracing::Level;
+use tracing::{Level, error};
 use tokio::sync::mpsc;
+
+#[cfg(feature = "ollama_integration")]
+use futures::StreamExt; // Added StreamExt for .next() method on streams
 
 use crate::config::Config;
 use crate::session_manager::SessionManager;
@@ -91,7 +94,7 @@ pub struct UILogEntry {
 #[derive(Clone, Debug)]
 pub enum ChatStreamEvent {
     Chunk(String),      // A piece of the response
-    Error(String),      // An error occurred during streaming
+    Error(String),      // An error occurred during streaming - changed from ollama_rs::error::OllamaError
     Completed,          // Streaming finished successfully
 }
 
@@ -308,6 +311,49 @@ impl App {
             }
         }
 
+        // Add chat view scrolling logic here
+        if self.active_view == TuiView::Chat && self.input_mode == InputMode::Normal {
+            if let Some(chat_session) = &self.active_chat {
+                if !chat_session.messages.is_empty() {
+                    let current_selection = self.chat_list_state.selected().unwrap_or(0);
+                    let num_messages = chat_session.messages.len();
+                    let view_height = 10; // Approximate height for PageUp/PageDown, can be refined
+
+                    match key_event.code {
+                        KeyCode::Up => {
+                            let next_selection = if current_selection > 0 { current_selection - 1 } else { 0 };
+                            self.chat_list_state.select(Some(next_selection));
+                            event_consumed = true;
+                        }
+                        KeyCode::Down => {
+                            let next_selection = if current_selection < num_messages - 1 { current_selection + 1 } else { num_messages - 1 };
+                            self.chat_list_state.select(Some(next_selection));
+                            event_consumed = true;
+                        }
+                        KeyCode::PageUp => {
+                            let next_selection = current_selection.saturating_sub(view_height);
+                            self.chat_list_state.select(Some(next_selection));
+                            event_consumed = true;
+                        }
+                        KeyCode::PageDown => {
+                            let next_selection = (current_selection + view_height).min(num_messages - 1);
+                            self.chat_list_state.select(Some(next_selection));
+                            event_consumed = true;
+                        }
+                        KeyCode::Home => {
+                            self.chat_list_state.select(Some(0));
+                            event_consumed = true;
+                        }
+                        KeyCode::End => {
+                            self.chat_list_state.select(Some(num_messages - 1));
+                            event_consumed = true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
         if event_consumed {
             return;
         }
@@ -443,69 +489,61 @@ impl App {
                                     let assistant_model_name = chat_session.model_name.clone();
                                     chat_session.messages.push(ChatMessage {
                                         sender: assistant_model_name.clone(),
-                                        content: "".to_string(), 
+                                        content: String::new(), // Placeholder, will be filled by stream
                                         timestamp: Local::now().format("%H:%M:%S").to_string(),
-                                        thought: None,
+                                        thought: None, 
                                     });
                                     chat_session.is_streaming = true;
 
-                                    let history_for_ollama = chat_session.messages.clone();
+                                    // Clone necessary data for the async block
+                                    let ollama_manager_clone = Arc::clone(&self.ollama_manager);
+                                    let model_name = assistant_model_name.clone();
+                                    let messages_for_stream = chat_session.messages.clone(); // Send full history
+                                    let stream_tx = self.chat_stream_sender.clone();
+                                    let system_prompt = self.get_active_system_prompt(&model_name);
 
-                                    #[cfg(feature = "ollama_integration")]
-                                    {
-                                        let ollama_manager_clone = Arc::clone(&self.ollama_manager);
-                                        let chat_stream_sender_clone = self.chat_stream_sender.clone();
-                                        
-                                        let system_prompt_to_use: Option<String> = 
-                                            self.editable_ollama_model_prompts.get(&assistant_model_name).cloned()
-                                            .or_else(|| self.config.default_system_prompt.clone());
-
-                                        if let Ok(handle) = Handle::try_current() { 
-                                            handle.spawn(async move {
-                                                match ollama_manager_clone.generate_response_stream(assistant_model_name, history_for_ollama, system_prompt_to_use).await {
-                                                    Ok(mut stream) => {
-                                                        while let Some(result_chunk) = futures::StreamExt::next(&mut stream).await {
-                                                            match result_chunk {
-                                                                Ok(chunk) => {
-                                                                    if chat_stream_sender_clone.send(ChatStreamEvent::Chunk(chunk)).is_err() {
-                                                                        break; 
-                                                                    }
-                                                                }
-                                                                Err(e) => {
-                                                                    let error_msg = format!("Ollama stream error: {}", e);
-                                                                    let _ = chat_stream_sender_clone.send(ChatStreamEvent::Error(error_msg));
-                                                                    break; 
-                                                                }
+                                    tokio::spawn(async move {
+                                        match ollama_manager_clone
+                                            .generate_response_stream(model_name.clone(), messages_for_stream, Some(system_prompt))
+                                            .await
+                                        {
+                                            Ok(mut stream) => {
+                                                while let Some(item_result) = stream.next().await {
+                                                    match item_result {
+                                                        Ok(chunk) => {
+                                                            if stream_tx.send(ChatStreamEvent::Chunk(chunk)).is_err() {
+                                                                error!("Failed to send chat chunk to TUI");
+                                                                break;
                                                             }
                                                         }
-                                                    }
-                                                    Err(e) => {
-                                                        let error_msg = format!("Failed to start Ollama stream: {}", e);
-                                                        let _ = chat_stream_sender_clone.send(ChatStreamEvent::Error(error_msg));
+                                                        Err(e_str) => { // e_str is now String
+                                                            error!("Chat stream item error: {}", e_str);
+                                                            if stream_tx.send(ChatStreamEvent::Error(e_str)).is_err() { // Send String
+                                                                error!("Failed to send chat stream error to TUI");
+                                                            }
+                                                            break; 
+                                                        }
                                                     }
                                                 }
-                                                let _ = chat_stream_sender_clone.send(ChatStreamEvent::Completed);
-                                            });
-                                        } else {
-                                            let error_msg = "Failed to spawn Ollama stream task: No Tokio runtime.".to_string();
-                                            if let Some(cs) = &mut self.active_chat { // Re-borrow chat_session mutably if needed
-                                                if let Some(last_message) = cs.messages.last_mut() {
-                                                    last_message.content = error_msg.clone();
+                                                if stream_tx.send(ChatStreamEvent::Completed).is_err() {
+                                                    error!("Failed to send chat stream completion to TUI");
                                                 }
-                                                cs.is_streaming = false;
                                             }
-                                            let _ = self.chat_stream_sender.send(ChatStreamEvent::Error(error_msg));
-                                            let _ = self.chat_stream_sender.send(ChatStreamEvent::Completed);
-                                        }
-                                    }
-                                    #[cfg(not(feature = "ollama_integration"))] {
-                                        if let Some(cs) = &mut self.active_chat { // Re-borrow chat_session mutably if needed
-                                            if let Some(last_message) = cs.messages.last_mut() {
-                                                last_message.content = "Ollama integration is disabled.".to_string();
+                                            Err(e) => { // This 'e' is anyhow::Error
+                                                error!("Failed to start chat stream: {:?}", e);
+                                                // Send the error message string to the TUI
+                                                if stream_tx.send(ChatStreamEvent::Error(e.to_string())).is_err() { // Send String
+                                                    error!("Failed to send initial chat stream error to TUI");
+                                                }
                                             }
-                                            cs.is_streaming = false;
                                         }
-                                        let _ = self.chat_stream_sender.send(ChatStreamEvent::Completed); 
+                                    });
+                                    
+                                    // Auto-scroll to the bottom of the chat view
+                                    if let Some(chat_session) = &self.active_chat {
+                                        if !chat_session.messages.is_empty() {
+                                            self.chat_list_state.select(Some(chat_session.messages.len() - 1));
+                                        }
                                     }
                                 }
                             }
