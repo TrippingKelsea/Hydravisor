@@ -284,8 +284,8 @@ impl PolicyEngine {
         //    - Consider VM policy context (is_trusted_vm, allowed_agents_for_vm).
 
         let (effective_role_name, effective_role_def) = self.determine_effective_role_and_settings(request)?;
-        let mut allowed = false;
-        let mut reason = format!("Action {:?} denied for role '{}' by default.", request.action, effective_role_name);
+        let allowed: bool;
+        let reason: String;
 
         match &request.action {
             ActionType::CreateVm | ActionType::CreateContainer => {

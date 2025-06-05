@@ -1,7 +1,8 @@
 // src/tui/widgets/chat.rs
+// use chrono::Local; // Removed unused import
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    layout::{Constraint, Direction, Layout, Rect}, // Removed Alignment
+    style::{Style, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,

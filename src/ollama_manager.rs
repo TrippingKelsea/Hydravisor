@@ -6,13 +6,14 @@ use crate::config::Config;
 use tracing::{info, error, debug, warn}; // Added tracing macros
 
 #[cfg(feature = "ollama_integration")]
-use ollama_rs::Ollama;
-
-#[cfg(feature = "ollama_integration")]
-use ollama_rs::models::LocalModel;
-
-#[cfg(feature = "ollama_integration")]
-use ollama_rs::generation::completion::request::GenerationRequest;
+use ollama_rs::{
+    Ollama,
+    models::LocalModel,
+    generation::chat::{ChatMessage, ChatMessageResponse, MessageRole}, // Import MessageRole
+    generation::chat::request::ChatMessageRequest,    
+    error::OllamaError,
+    reqwest, // Import the re-exported reqwest module
+};
 
 #[cfg(feature = "ollama_integration")]
 use futures::stream::StreamExt;
@@ -101,26 +102,72 @@ impl OllamaManager {
     #[cfg(feature = "ollama_integration")]
     pub async fn generate_response_stream(
         &self,
-        model_name: String,
-        prompt: String,
+        model_name_param: String,
+        history: Vec<crate::tui::ChatMessage>, 
+        system_prompt_override: Option<String>,
     ) -> Result<impl StreamExt<Item = Result<String, ollama_rs::error::OllamaError>>> {
         if let Some(client) = &self.client {
-            debug!("Generating response stream from Ollama model: {}, prompt: \"{}\"", model_name, prompt);
-            let request = GenerationRequest::new(model_name.clone(), prompt.clone());
-            match client.generate_stream(request).await {
+            let mut ollama_messages: Vec<ChatMessage> = Vec::new();
+
+            if let Some(sp) = system_prompt_override {
+                if !sp.is_empty() {
+                    ollama_messages.push(ChatMessage::new(MessageRole::System, sp.clone()));
+                    debug!("Using system prompt override: \"{}\"", sp);
+                } else {
+                    debug!("System prompt override was empty, not adding system message.");
+                }
+            } else {
+                debug!("No system prompt override provided.");
+            }
+            
+            for tui_msg in history.iter() {
+                if tui_msg.sender != "user" && tui_msg.content.is_empty() && tui_msg.thought.is_none() {
+                    debug!("Skipping empty placeholder assistant message from history for model: {}", tui_msg.sender);
+                    continue;
+                }
+                let role = if tui_msg.sender == "user" {
+                    MessageRole::User
+                } else {
+                    MessageRole::Assistant
+                };
+                ollama_messages.push(ChatMessage::new(role, tui_msg.content.clone()));
+            }
+
+            if ollama_messages.is_empty() {
+                error!("Cannot send empty message list to Ollama for model: {}", model_name_param);
+                return Err(anyhow::anyhow!("Message list for Ollama is empty after processing history."));
+            }
+            if ollama_messages.last().map_or(true, |msg| msg.role != MessageRole::User) { // Compare with MessageRole enum
+                 error!("The last message in the history sent to Ollama must be from the user. Model: {}", model_name_param);
+                 return Err(anyhow::anyhow!("Last message to Ollama was not from User."));
+            }
+
+            debug!(
+                "Sending {} messages to Ollama model: {}. Last user prompt: \"{}\"",
+                ollama_messages.len(),
+                model_name_param,
+                ollama_messages.last().map_or("N/A", |m| m.content.as_str())
+            );
+            
+            let chat_request = ChatMessageRequest::new(model_name_param.clone(), ollama_messages);
+
+            match client.send_chat_messages_stream(chat_request).await {
                 Ok(ollama_stream) => {
-                    debug!("Successfully started generation stream for model: {}", model_name);
-                    Ok(ollama_stream.map(|result_vec_gen_response| {
-                        // result_vec_gen_response is Result<Vec<GenerationResponse>, OllamaError>
-                        result_vec_gen_response.map(|vec_gen_response| {
-                            // Iterate over the vector and collect the response strings
-                            vec_gen_response.into_iter().map(|gr| gr.response).collect::<String>()
+                    debug!("Successfully started chat messages stream for model: {}", model_name_param);
+                    Ok(ollama_stream.map(|result_chat_message_response: Result<ChatMessageResponse, ()>| {
+                        result_chat_message_response
+                            .map_err(|_| ollama_rs::error::OllamaError::APIError { // Use fully qualified path
+                                error_message: "Error processing stream item".to_string(),
+                                status_code: reqwest::StatusCode::INTERNAL_SERVER_ERROR, // Use StatusCode via imported reqwest
+                            })
+                            .map(|chat_message_response| {
+                                chat_message_response.message.map_or_else(String::new, |chat_msg| chat_msg.content)
                         })
                     }))
                 },
                 Err(e) => {
-                    error!("Failed to start generation stream for model {}: {}", model_name, e);
-                    Err(anyhow::anyhow!("Failed to start generation stream for model {}: {}", model_name, e))
+                    error!("Failed to start chat messages stream for model {}: {}", model_name_param, e);
+                    Err(anyhow::anyhow!("Failed to start chat messages stream for model {}: {}", model_name_param, e))
                 }
             }
         } else {
@@ -134,9 +181,16 @@ impl OllamaManager {
     pub async fn generate_response_stream(
         &self,
         model_name: String,
-        prompt: String,
-    ) -> Result<futures::stream::Empty<Result<String, String>>> {
-        warn!("Ollama integration not enabled. Cannot generate stream for model: {}, prompt: {}", model_name, prompt);
+        history: Vec<crate::tui::ChatMessage>,
+        system_prompt_override: Option<String>,
+    ) -> Result<futures::stream::Empty<Result<String, String>>> { // Changed OllamaError to String for cfg-disabled case
+        let last_prompt = history.last().map_or("N/A", |m| m.content.as_str());
+        warn!(
+            "Ollama integration not enabled. Cannot generate stream for model: {}, system_prompt: {:?}, last user prompt: {}.", 
+            model_name, 
+            system_prompt_override.as_deref().unwrap_or("None"),
+            last_prompt
+        );
         Ok(futures::stream::empty()) 
     }
 

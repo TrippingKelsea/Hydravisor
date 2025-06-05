@@ -129,6 +129,12 @@ pub struct App {
     chat_stream_receiver: Option<mpsc::UnboundedReceiver<ChatStreamEvent>>,
     chat_list_state: ListState,
     theme: Arc<AppTheme>, // Add theme field
+
+    // For editing system prompts
+    editing_system_prompt_for_model: Option<String>, // Name of the model whose system prompt is being edited
+    // This map will hold live edits to system prompts before saving to config
+    // It's initialized from app.config and is the source for OllamaModelListWidget display
+    editable_ollama_model_prompts: std::collections::HashMap<String, String>,
 }
 
 impl App {
@@ -143,6 +149,12 @@ impl App {
     ) -> Self {
         // Create channel for chat stream events
         let (chat_tx, chat_rx) = mpsc::unbounded_channel::<ChatStreamEvent>();
+
+        // Initialize editable_ollama_model_prompts from config
+        let mut initial_editable_prompts = std::collections::HashMap::new();
+        if let Some(model_prompts) = &config.providers.ollama.model_system_prompts {
+            initial_editable_prompts = model_prompts.clone();
+        }
 
         let mut app = Self {
             should_quit: false,
@@ -168,6 +180,8 @@ impl App {
             chat_stream_receiver: Some(chat_rx),
             chat_list_state: ListState::default(),
             theme: Arc::new(AppTheme::default()), // Initialize theme
+            editing_system_prompt_for_model: None,
+            editable_ollama_model_prompts: initial_editable_prompts,
         };
 
         #[cfg(feature = "ollama_integration")]
@@ -219,6 +233,15 @@ impl App {
                 self.vms = Vec::new();
             }
         }
+    }
+
+    // Helper to get the active system prompt for a model, considering edits
+    fn get_active_system_prompt(&self, model_name: &str) -> String {
+        self.editable_ollama_model_prompts
+            .get(model_name)
+            .cloned()
+            .or_else(|| self.config.default_system_prompt.clone())
+            .unwrap_or_else(|| "You are a helpful AI assistant.".to_string()) // Fallback if even default is None
     }
 
     pub fn on_key(&mut self, key_event: KeyEvent) {
@@ -289,163 +312,211 @@ impl App {
             return;
         }
         
-        // Handle input mode switching and global quit
-        if !event_consumed {
-            // General key handling for other views or modes
-            match self.input_mode {
-                InputMode::Normal => {
-                    match key_event.code {
-                        KeyCode::Char('q') => self.should_quit = true,
-                        KeyCode::Char('i') => {
-                            if self.active_view == TuiView::Chat && self.active_chat.is_some() {
-                                self.input_mode = InputMode::Editing;
+        // Global quit, already handled if input_mode is Normal and key is 'q'
+        // Need to ensure 'q' doesn't quit if editing_system_prompt_for_model is Some
+
+        if self.editing_system_prompt_for_model.is_some() {
+            match key_event.code {
+                KeyCode::Enter => {
+                    if let Some(model_name) = self.editing_system_prompt_for_model.take() {
+                        self.editable_ollama_model_prompts.insert(model_name.clone(), self.current_input.clone());
+                        let mut config_to_save = (*self.config).clone();
+                        if config_to_save.providers.ollama.model_system_prompts.is_none() {
+                            config_to_save.providers.ollama.model_system_prompts = Some(std::collections::HashMap::new());
+                        }
+                        config_to_save.providers.ollama.model_system_prompts = Some(self.editable_ollama_model_prompts.clone());
+                        match config_to_save.save() {
+                            Ok(_) => {
+                                self.config = Arc::new(config_to_save);
+                                tracing::info!("System prompt for {} updated and config saved.", model_name);
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to save config after updating system prompt for {}: {}", model_name, e);
                             }
                         }
-                        KeyCode::BackTab => {
-                            self.active_view = match self.active_view {
-                                TuiView::VmList => TuiView::Logs,
-                                TuiView::OllamaModelList => TuiView::VmList,
-                                TuiView::Chat => TuiView::OllamaModelList,
-                                TuiView::Logs => TuiView::Chat,
-                            };
-                            self.vm_list_state.select(if self.vms.is_empty() { None } else { Some(0) });
+                        self.current_input.clear();
+                        self.input_mode = InputMode::Normal;
+                    }
+                }
+                KeyCode::Char(c) => self.current_input.push(c),
+                KeyCode::Backspace => { self.current_input.pop(); }
+                KeyCode::Esc => {
+                    self.editing_system_prompt_for_model = None;
+                    self.current_input.clear();
+                    self.input_mode = InputMode::Normal;
+                }
+                _ => {}
+            }
+            return; // Consume keys if editing system prompt
+        }
+
+        // --- Start: Normal Mode and Chat Editing Mode Logic ---
+        match self.input_mode {
+            InputMode::Normal => {
+                match key_event.code {
+                    KeyCode::Char('q') => self.should_quit = true,
+                    KeyCode::Char('e') => { // Edit system prompt
+                        if self.active_view == TuiView::OllamaModelList {
                             #[cfg(feature = "ollama_integration")]
-                            self.ollama_model_list_state.select(if self.ollama_models.is_empty() { None } else { Some(0) });
-                        }
-                        KeyCode::Tab => {
-                            self.active_view = match self.active_view {
-                                TuiView::VmList => TuiView::OllamaModelList,
-                                TuiView::OllamaModelList => TuiView::Chat,
-                                TuiView::Chat => TuiView::Logs,
-                                TuiView::Logs => TuiView::VmList,
-                            };
-                            self.vm_list_state.select(if self.vms.is_empty() { None } else { Some(0) });
-                            #[cfg(feature = "ollama_integration")]
-                            self.ollama_model_list_state.select(if self.ollama_models.is_empty() { None } else { Some(0) });
-                        }
-                        KeyCode::Down => match self.active_view {
-                            TuiView::VmList => self.select_next_item_in_vm_list(),
-                            TuiView::OllamaModelList => self.select_next_item_in_ollama_list(),
-                            _ => {} 
-                        },
-                        KeyCode::Up => match self.active_view {
-                            TuiView::VmList => self.select_previous_item_in_vm_list(),
-                            TuiView::OllamaModelList => self.select_previous_item_in_ollama_list(),
-                            _ => {} 
-                        },
-                        KeyCode::Enter => {
-                            if self.active_view == TuiView::OllamaModelList {
-                                #[cfg(feature = "ollama_integration")]
-                                if let Some(selected_idx) = self.ollama_model_list_state.selected() {
-                                    if let Some(model) = self.ollama_models.get(selected_idx) {
-                                        self.active_chat = Some(ChatSession {
-                                            model_name: model.name.clone(),
-                                            messages: Vec::new(),
-                                            is_streaming: false,
-                                        });
-                                        self.active_view = TuiView::Chat;
-                                        self.input_mode = InputMode::Editing;
-                                        self.current_input.clear();
-                                    }
+                            if let Some(selected_idx) = self.ollama_model_list_state.selected() {
+                                if let Some(model) = self.ollama_models.get(selected_idx) {
+                                    self.editing_system_prompt_for_model = Some(model.name.clone());
+                                    self.current_input = self.get_active_system_prompt(&model.name);
+                                    self.input_mode = InputMode::Editing;
                                 }
                             }
                         }
-                        _ => {}
                     }
+                    KeyCode::Char('i') => { // Enter chat input mode
+                        if self.active_view == TuiView::Chat && self.active_chat.is_some() {
+                             // self.editing_system_prompt_for_model is None due to check above
+                            self.input_mode = InputMode::Editing;
+                            // current_input is already the buffer for chat, ensure it's clear if needed.
+                        }
+                    }
+                    KeyCode::BackTab => {
+                        self.active_view = match self.active_view {
+                            TuiView::VmList => TuiView::Logs,
+                            TuiView::OllamaModelList => TuiView::VmList,
+                            TuiView::Chat => TuiView::OllamaModelList,
+                            TuiView::Logs => TuiView::Chat,
+                        };
+                        self.vm_list_state.select(if self.vms.is_empty() { None } else { Some(0) });
+                        #[cfg(feature = "ollama_integration")]
+                        self.ollama_model_list_state.select(if self.ollama_models.is_empty() { None } else { Some(0) });
+                    }
+                    KeyCode::Tab => {
+                        self.active_view = match self.active_view {
+                            TuiView::VmList => TuiView::OllamaModelList,
+                            TuiView::OllamaModelList => TuiView::Chat,
+                            TuiView::Chat => TuiView::Logs,
+                            TuiView::Logs => TuiView::VmList,
+                        };
+                        self.vm_list_state.select(if self.vms.is_empty() { None } else { Some(0) });
+                        #[cfg(feature = "ollama_integration")]
+                        self.ollama_model_list_state.select(if self.ollama_models.is_empty() { None } else { Some(0) });
+                    }
+                    KeyCode::Down => match self.active_view {
+                        TuiView::VmList => self.select_next_item_in_vm_list(),
+                        TuiView::OllamaModelList => self.select_next_item_in_ollama_list(),
+                        _ => {} 
+                    },
+                    KeyCode::Up => match self.active_view {
+                        TuiView::VmList => self.select_previous_item_in_vm_list(),
+                        TuiView::OllamaModelList => self.select_previous_item_in_ollama_list(),
+                        _ => {} 
+                    },
+                    KeyCode::Enter => { // Select Ollama model to start chat
+                        if self.active_view == TuiView::OllamaModelList {
+                            #[cfg(feature = "ollama_integration")]
+                            if let Some(selected_idx) = self.ollama_model_list_state.selected() {
+                                if let Some(model) = self.ollama_models.get(selected_idx) {
+                                    self.active_chat = Some(ChatSession {
+                                        model_name: model.name.clone(),
+                                        messages: Vec::new(),
+                                        is_streaming: false,
+                                    });
+                                    self.active_view = TuiView::Chat;
+                                    self.current_input.clear(); 
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
-                InputMode::Editing => {
-                    match key_event.code {
-                        KeyCode::Enter => {
-                            if self.active_view == TuiView::Chat && self.active_chat.is_some() {
-                                let prompt_text = self.current_input.drain(..).collect::<String>();
-                                if !prompt_text.is_empty() {
-                                    if let Some(chat_session) = &mut self.active_chat {
-                                        chat_session.messages.push(ChatMessage {
-                                            sender: "user".to_string(),
-                                            content: prompt_text.clone(),
-                                            timestamp: Local::now().format("%H:%M:%S").to_string(),
-                                            thought: None,
-                                        });
+            }
+            InputMode::Editing => {
+                // This is for CHAT INPUT only, system prompt editing is handled above and returns.
+                match key_event.code {
+                    KeyCode::Enter => {
+                        if self.active_view == TuiView::Chat {
+                            let prompt_text = self.current_input.drain(..).collect::<String>();
+                            if !prompt_text.is_empty() {
+                                if let Some(chat_session) = self.active_chat.as_mut() {
+                                    chat_session.messages.push(ChatMessage {
+                                        sender: "user".to_string(),
+                                        content: prompt_text.clone(),
+                                        timestamp: Local::now().format("%H:%M:%S").to_string(),
+                                        thought: None,
+                                    });
 
-                                        let assistant_model_name = chat_session.model_name.clone();
-                                        chat_session.messages.push(ChatMessage {
-                                            sender: assistant_model_name.clone(),
-                                            content: "".to_string(), // Placeholder
-                                            timestamp: Local::now().format("%H:%M:%S").to_string(),
-                                            thought: None,
-                                        });
-                                        chat_session.is_streaming = true;
+                                    let assistant_model_name = chat_session.model_name.clone();
+                                    chat_session.messages.push(ChatMessage {
+                                        sender: assistant_model_name.clone(),
+                                        content: "".to_string(), 
+                                        timestamp: Local::now().format("%H:%M:%S").to_string(),
+                                        thought: None,
+                                    });
+                                    chat_session.is_streaming = true;
 
-                                        #[cfg(feature = "ollama_integration")]
-                                        {
-                                            // Clone necessary data for the async task
-                                            let ollama_manager_clone = Arc::clone(&self.ollama_manager);
-                                            let chat_stream_sender_clone = self.chat_stream_sender.clone();
-                                            
-                                            if let Ok(handle) = Handle::try_current() { // Handle is in scope due to feature gate on this block
-                                                handle.spawn(async move {
-                                                    match ollama_manager_clone.generate_response_stream(assistant_model_name.clone(), prompt_text).await {
-                                                        Ok(mut stream) => {
-                                                            // The stream from the ollama_integration feature IS StreamExt
-                                                            while let Some(result_chunk) = futures::StreamExt::next(&mut stream).await {
-                                                                match result_chunk {
-                                                                    Ok(chunk) => {
-                                                                        if chat_stream_sender_clone.send(ChatStreamEvent::Chunk(chunk)).is_err() {
-                                                                            break; // Receiver dropped
-                                                                        }
+                                    let history_for_ollama = chat_session.messages.clone();
+
+                                    #[cfg(feature = "ollama_integration")]
+                                    {
+                                        let ollama_manager_clone = Arc::clone(&self.ollama_manager);
+                                        let chat_stream_sender_clone = self.chat_stream_sender.clone();
+                                        
+                                        let system_prompt_to_use: Option<String> = 
+                                            self.editable_ollama_model_prompts.get(&assistant_model_name).cloned()
+                                            .or_else(|| self.config.default_system_prompt.clone());
+
+                                        if let Ok(handle) = Handle::try_current() { 
+                                            handle.spawn(async move {
+                                                match ollama_manager_clone.generate_response_stream(assistant_model_name, history_for_ollama, system_prompt_to_use).await {
+                                                    Ok(mut stream) => {
+                                                        while let Some(result_chunk) = futures::StreamExt::next(&mut stream).await {
+                                                            match result_chunk {
+                                                                Ok(chunk) => {
+                                                                    if chat_stream_sender_clone.send(ChatStreamEvent::Chunk(chunk)).is_err() {
+                                                                        break; 
                                                                     }
-                                                                    Err(e) => {
-                                                                        let error_msg = format!("Ollama stream error: {}", e);
-                                                                        let _ = chat_stream_sender_clone.send(ChatStreamEvent::Error(error_msg));
-                                                                        break; // Stop on stream error
-                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    let error_msg = format!("Ollama stream error: {}", e);
+                                                                    let _ = chat_stream_sender_clone.send(ChatStreamEvent::Error(error_msg));
+                                                                    break; 
                                                                 }
                                                             }
                                                         }
-                                                        Err(e) => {
-                                                            let error_msg = format!("Failed to start Ollama stream: {}", e);
-                                                            let _ = chat_stream_sender_clone.send(ChatStreamEvent::Error(error_msg));
-                                                        }
                                                     }
-                                                    let _ = chat_stream_sender_clone.send(ChatStreamEvent::Completed);
-                                                });
-                                            } else {
-                                                // This else block is under ollama_integration feature gate
-                                                let error_msg = "Failed to spawn Ollama stream task: No Tokio runtime (ollama_integration active).".to_string();
-                                                if let Some(active_chat_session) = &mut self.active_chat {
-                                                    if let Some(last_message) = active_chat_session.messages.last_mut() {
-                                                        last_message.content = error_msg.clone();
+                                                    Err(e) => {
+                                                        let error_msg = format!("Failed to start Ollama stream: {}", e);
+                                                        let _ = chat_stream_sender_clone.send(ChatStreamEvent::Error(error_msg));
                                                     }
-                                                    active_chat_session.is_streaming = false;
                                                 }
-                                                let _ = self.chat_stream_sender.send(ChatStreamEvent::Error(error_msg));
-                                                let _ = self.chat_stream_sender.send(ChatStreamEvent::Completed);
-                                            }
-                                        }
-
-                                        #[cfg(not(feature = "ollama_integration"))]
-                                        {
-                                            // Ollama integration is disabled, provide a canned response
-                                            if let Some(active_chat_session) = &mut self.active_chat {
-                                                if let Some(last_message) = active_chat_session.messages.last_mut() {
-                                                    last_message.content = "Ollama integration is disabled.".to_string();
+                                                let _ = chat_stream_sender_clone.send(ChatStreamEvent::Completed);
+                                            });
+                                        } else {
+                                            let error_msg = "Failed to spawn Ollama stream task: No Tokio runtime.".to_string();
+                                            if let Some(cs) = &mut self.active_chat { // Re-borrow chat_session mutably if needed
+                                                if let Some(last_message) = cs.messages.last_mut() {
+                                                    last_message.content = error_msg.clone();
                                                 }
-                                                active_chat_session.is_streaming = false;
+                                                cs.is_streaming = false;
                                             }
-                                            // We can still send Completed via channel if desired, or just update UI directly
-                                            let _ = self.chat_stream_sender.send(ChatStreamEvent::Completed); 
+                                            let _ = self.chat_stream_sender.send(ChatStreamEvent::Error(error_msg));
+                                            let _ = self.chat_stream_sender.send(ChatStreamEvent::Completed);
                                         }
+                                    }
+                                    #[cfg(not(feature = "ollama_integration"))] {
+                                        if let Some(cs) = &mut self.active_chat { // Re-borrow chat_session mutably if needed
+                                            if let Some(last_message) = cs.messages.last_mut() {
+                                                last_message.content = "Ollama integration is disabled.".to_string();
+                                            }
+                                            cs.is_streaming = false;
+                                        }
+                                        let _ = self.chat_stream_sender.send(ChatStreamEvent::Completed); 
                                     }
                                 }
                             }
                         }
-                        KeyCode::Char(c) => self.current_input.push(c),
-                        KeyCode::Backspace => { self.current_input.pop(); }
-                        KeyCode::Esc => {
-                            self.input_mode = InputMode::Normal;
-                        }
-                        _ => {}
                     }
+                    KeyCode::Char(c) => self.current_input.push(c),
+                    KeyCode::Backspace => { self.current_input.pop(); }
+                    KeyCode::Esc => {
+                        self.input_mode = InputMode::Normal;
+                    }
+                    _ => {}
                 }
             }
         }

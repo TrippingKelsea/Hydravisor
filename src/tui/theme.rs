@@ -9,8 +9,12 @@ pub struct AppTheme {
     pub tertiary_foreground: Color,
     pub border_primary: Color,
     pub border_secondary: Color,
+    pub border_accent: Color,
     pub highlight_style: Style, // For list selections, etc.
     pub error_text: Color,
+    pub warning_text: Color,
+    pub success_text: Color,
+    pub info_text: Color,
 
     // Status Bar
     pub status_bar_background: Color,
@@ -23,6 +27,8 @@ pub struct AppTheme {
     pub input_bar_background: Color,
     pub input_bar_text_fg: Color,
     pub input_bar_border: Color,
+    pub input_bar_title: Style,
+    pub input_bar_text: Color,
 
     // VM List
     pub vm_list_title: Style,
@@ -33,6 +39,11 @@ pub struct AppTheme {
 
     // Ollama Model List
     pub ollama_list_title: Style,
+    pub ollama_model_details_label: Style,
+    pub ollama_model_details_value: Style,
+    pub ollama_system_prompt_label: Style,
+    pub ollama_system_prompt_tag: Style,
+    pub ollama_system_prompt_content: Style,
 
     // Chat Widget
     pub chat_title: Style,
@@ -64,8 +75,12 @@ impl Default for AppTheme {
             tertiary_foreground: Color::DarkGray,
             border_primary: Color::DarkGray,
             border_secondary: Color::LightCyan, // Example for active borders
+            border_accent: Color::Cyan,
             highlight_style: Style::default().add_modifier(Modifier::REVERSED),
             error_text: Color::Red,
+            warning_text: Color::Yellow,
+            success_text: Color::Green,
+            info_text: Color::Cyan,
 
             // Status Bar
             status_bar_background: Color::Blue,
@@ -78,6 +93,8 @@ impl Default for AppTheme {
             input_bar_background: Color::DarkGray,
             input_bar_text_fg: Color::White,
             input_bar_border: Color::White,
+            input_bar_title: Style::default().fg(Color::Rgb(180, 180, 180)),
+            input_bar_text: Color::Rgb(220, 220, 220),
 
             // VM List
             vm_list_title: Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
@@ -88,6 +105,11 @@ impl Default for AppTheme {
 
             // Ollama Model List
             ollama_list_title: Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD),
+            ollama_model_details_label: Style::default().fg(Color::Gray),
+            ollama_model_details_value: Style::default().fg(Color::White),
+            ollama_system_prompt_label: Style::default().fg(Color::Gray),
+            ollama_system_prompt_tag: Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+            ollama_system_prompt_content: Style::default().fg(Color::White),
 
             // Chat Widget
             chat_title: Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),

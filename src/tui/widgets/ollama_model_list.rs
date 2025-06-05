@@ -1,12 +1,12 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::Style,
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
 use crate::tui::App;
-
+use textwrap;
 
 pub struct OllamaModelListWidget;
 
@@ -52,17 +52,40 @@ impl OllamaModelListWidget {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.border_secondary));
         let right_pane_content_area = right_pane_block.inner(chunks[1]);
-        f.render_widget(right_pane_block, chunks[1]);
+        f.render_widget(right_pane_block.clone(), chunks[1]);
 
         #[cfg(feature = "ollama_integration")] {
             if let Some(selected_idx) = app.ollama_model_list_state.selected() {
                 if let Some(model) = app.ollama_models.get(selected_idx) {
-                    let details_text = vec![
-                        Line::from(vec![Span::styled("Name: ", Style::default().fg(theme.secondary_foreground)), Span::raw(&model.name)]),
-                        Line::from(vec![Span::styled("Modified: ", Style::default().fg(theme.secondary_foreground)), Span::raw(&model.modified_at)]),
-                        Line::from(vec![Span::styled("Size: ", Style::default().fg(theme.secondary_foreground)), Span::raw(format!("{}", model.size))]),
+                    let mut details_lines = vec![
+                        Line::from(vec![Span::styled("Name: ", theme.ollama_model_details_label), Span::raw(&model.name)]),
+                        Line::from(vec![Span::styled("Modified: ", theme.ollama_model_details_label), Span::raw(&model.modified_at)]),
+                        Line::from(vec![Span::styled("Size: ", theme.ollama_model_details_label), Span::raw(format!("{}", model.size))]),
+                        Line::from(""),
                     ];
-                    f.render_widget(Paragraph::new(Text::from(details_text)).style(Style::default().fg(theme.primary_foreground)), right_pane_content_area);
+
+                    // Simplified logic for the tag:
+                    let active_system_prompt_tag_str = if app.editable_ollama_model_prompts.contains_key(&model.name) {
+                        "(Model specific)".to_string()
+                    } else {
+                        "(Using default)".to_string()
+                    };
+
+                    let system_prompt_to_display = app.get_active_system_prompt(&model.name);
+                    
+                    details_lines.push(Line::from(vec![
+                        Span::styled("System Prompt ", theme.ollama_system_prompt_label),
+                        Span::styled(active_system_prompt_tag_str, theme.ollama_system_prompt_tag),
+                    ]));
+                    
+                    let prompt_content_width = right_pane_content_area.width.saturating_sub(2) as usize;
+                    textwrap::fill(&system_prompt_to_display, prompt_content_width)
+                        .lines()
+                        .for_each(|line_str| {
+                            details_lines.push(Line::from(Span::styled(line_str.to_string(), theme.ollama_system_prompt_content)));
+                        });
+                    
+                    f.render_widget(Paragraph::new(Text::from(details_lines)).wrap(ratatui::widgets::Wrap { trim: false }).style(Style::default().fg(theme.primary_foreground)), right_pane_content_area);
                 } else {
                     f.render_widget(Paragraph::new("No model selected or data unavailable.").style(Style::default().fg(theme.secondary_foreground)), right_pane_content_area);
                 }

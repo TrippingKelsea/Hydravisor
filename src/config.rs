@@ -1,6 +1,7 @@
 // src/config.rs
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 use xdg::BaseDirectories;
@@ -11,7 +12,7 @@ pub const DEFAULT_POLICY_FILENAME: &str = "policy.toml";
 pub const DEFAULT_SSH_CONFIG_FILENAME: &str = "ssh.toml";
 
 // Main configuration structure, mapping to config.toml
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
@@ -34,9 +35,11 @@ pub struct Config {
     pub ssh_config_file_path: Option<PathBuf>,
     pub ollama_host: Option<String>,
     pub ollama_port: Option<u16>,
+    #[serde(default = "default_global_system_prompt")]
+    pub default_system_prompt: Option<String>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct InterfaceConfig {
     #[serde(default = "default_interface_mode")]
@@ -67,7 +70,7 @@ impl Default for InterfaceConfig {
     }
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct DefaultsConfig {
     #[serde(default = "default_vm_image")]
@@ -110,7 +113,7 @@ impl Default for DefaultsConfig {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ProvidersConfig {
     #[serde(default)]
@@ -119,7 +122,7 @@ pub struct ProvidersConfig {
     pub bedrock: BedrockConfig,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct OllamaConfig {
     #[serde(default)]
@@ -128,6 +131,8 @@ pub struct OllamaConfig {
     pub path: String, // Path to ollama binary
     #[serde(default)]
     pub models: Vec<String>,
+    #[serde(default)]
+    pub model_system_prompts: Option<HashMap<String, String>>,
 }
 
 fn default_ollama_path() -> String {
@@ -140,11 +145,12 @@ impl Default for OllamaConfig {
             enabled: true, // Often true by default for local-first approach
             path: default_ollama_path(),
             models: vec!["llama3".to_string(), "mistral".to_string()],
+            model_system_prompts: None,
         }
     }
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct BedrockConfig {
     #[serde(default)]
@@ -172,7 +178,7 @@ impl Default for BedrockConfig {
     }
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct LoggingConfig {
     #[serde(default = "default_log_level")]
@@ -209,7 +215,7 @@ impl Default for LoggingConfig {
     }
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct TmuxConfig {
     #[serde(default = "default_session_prefix")]
@@ -246,7 +252,7 @@ impl Default for TmuxConfig {
     }
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct McpConfig {
     #[serde(default = "default_mcp_socket_path")]
@@ -277,6 +283,10 @@ impl Default for McpConfig {
     }
 }
 
+fn default_global_system_prompt() -> Option<String> {
+    Some("You are a helpful AI assistant.".to_string())
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -286,10 +296,11 @@ impl Default for Config {
             logging: LoggingConfig::default(),
             tmux: TmuxConfig::default(),
             mcp: McpConfig::default(),
-            policy_file_path: None, // Determined at load time
-            ssh_config_file_path: None, // Determined at load time
-            ollama_host: None,
-            ollama_port: None,
+            policy_file_path: None,
+            ssh_config_file_path: None,
+            ollama_host: Some("http://localhost".to_string()),
+            ollama_port: Some(11434),
+            default_system_prompt: default_global_system_prompt(),
         }
     }
 }
@@ -341,6 +352,38 @@ impl Config {
         // Example: loaded_config.logging.log_dir = shellexpand::tilde(&loaded_config.logging.log_dir).into_owned();
 
         Ok(loaded_config)
+    }
+
+    pub fn save(&self) -> Result<()> {
+        let xdg_dirs = BaseDirectories::with_prefix(APP_NAME)
+            .context("Failed to get XDG base directories")?;
+        
+        // Determine config directory and ensure it exists
+        let config_home = xdg_dirs.get_config_home();
+        if !config_home.exists() {
+            std::fs::create_dir_all(&config_home).with_context(|| 
+                format!("Failed to create config directory at {:?}", config_home)
+            )?;
+            info!("Created config directory at {:?}", config_home);
+        }
+
+        let config_path = config_home.join(DEFAULT_CONFIG_FILENAME);
+        info!("Attempting to save configuration to: {:?}", config_path);
+
+        // Create a clone of self to modify for serialization if needed,
+        // especially to ensure skipped fields in `load` are not attempted to be saved
+        // if they were part of the struct. In our case, policy_file_path and ssh_config_file_path
+        // are already marked with #[serde(skip)] for serialization, so a direct clone is fine.
+        let config_to_save = self.clone();
+
+        let toml_string = toml::to_string_pretty(&config_to_save)
+            .context("Failed to serialize config to TOML string")?;
+        
+        std::fs::write(&config_path, toml_string)
+            .with_context(|| format!("Failed to write config to file: {:?}", config_path))?;
+        
+        info!("Configuration saved successfully to {:?}", config_path);
+        Ok(())
     }
 }
 
