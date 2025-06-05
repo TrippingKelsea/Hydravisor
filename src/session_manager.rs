@@ -140,6 +140,7 @@ impl SessionManager {
                     instance_id: format!("env-{}", uuid::Uuid::new_v4().simple()),
                     env_type: EnvironmentType::Vm, // Default
                     base_image: "placeholder-default-image".to_string(),
+                    boot_iso: None,
                     cpu_cores: 1,
                     memory_mb: 1024,
                     disk_gb: Some(10),

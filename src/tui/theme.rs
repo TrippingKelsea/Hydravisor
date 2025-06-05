@@ -21,6 +21,8 @@ pub struct AppTheme {
     pub status_bar_foreground: Color,
     pub status_bar_mode_normal_bg: Color,
     pub status_bar_mode_editing_bg: Color,
+    pub status_bar_mode_vm_wizard_bg: Color,
+    pub status_bar_mode_confirm_destroy_bg: Color,
     pub status_bar_view_name_fg: Color,
 
     // Input Bar
@@ -65,6 +67,10 @@ pub struct AppTheme {
     pub log_level_error: Style,
     pub log_timestamp: Style,
     pub log_target: Style,
+
+    // Popup
+    pub popup_border: Color,
+    pub popup_background: Color,
 }
 
 impl Default for AppTheme {
@@ -89,6 +95,8 @@ impl Default for AppTheme {
             status_bar_foreground: Color::White,
             status_bar_mode_normal_bg: Color::LightCyan,
             status_bar_mode_editing_bg: Color::LightMagenta,
+            status_bar_mode_vm_wizard_bg: Color::LightGreen,
+            status_bar_mode_confirm_destroy_bg: Color::LightRed,
             status_bar_view_name_fg: Color::Yellow,
 
             // Input Bar
@@ -133,6 +141,10 @@ impl Default for AppTheme {
             log_level_error: Style::default().fg(Color::Red),
             log_timestamp: Style::default().fg(Color::DarkGray),
             log_target: Style::default().fg(Color::Cyan),
+            
+            // Popup
+            popup_border: Color::Yellow,
+            popup_background: Color::DarkGray,
         }
     }
 } 

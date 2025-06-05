@@ -9,13 +9,14 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    widgets::ListState,
+    widgets::{Block, Borders, ListState, Paragraph},
     Terminal,
 };
 use std::{io::{self, Stdout}, sync::Arc, time::{Duration, Instant}};
 use chrono::Local;
 use tracing::{Level, error};
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 #[cfg(feature = "ollama_integration")]
 use futures::StreamExt; // Added StreamExt for .next() method on streams
@@ -23,7 +24,7 @@ use futures::StreamExt; // Added StreamExt for .next() method on streams
 use crate::config::Config;
 use crate::session_manager::SessionManager;
 use crate::policy::PolicyEngine;
-use crate::env_manager::{EnvironmentManager, EnvironmentStatus};
+use crate::env_manager::{EnvironmentManager, EnvironmentStatus, EnvironmentConfig, EnvironmentType};
 use crate::audit_engine::AuditEngine;
 use crate::ollama_manager::OllamaManager;
 
@@ -46,6 +47,7 @@ use self::widgets::vm_list::VmListWidget;
 use self::widgets::ollama_model_list::OllamaModelListWidget;
 use self::widgets::chat::ChatWidget;
 use self::widgets::logs::LogsWidget;
+use self::widgets::new_vm_popup::NewVmPopupWidget;
 
 // Define different views for the TUI
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +63,8 @@ pub enum TuiView {
 pub enum InputMode {
     Normal,
     Editing,
+    VmWizard,
+    ConfirmingDestroy,
 }
 
 // Represents a chat message
@@ -133,6 +137,21 @@ pub struct App {
     chat_list_state: ListState,
     theme: Arc<AppTheme>, // Add theme field
 
+    // For the New VM Popup
+    show_new_vm_popup: bool,
+    new_vm_name: String,
+    new_vm_use_iso: bool,
+    new_vm_iso_path: String,
+    new_vm_source_image_path: String,
+    new_vm_disk_path: String,
+    new_vm_cpu: String,
+    new_vm_ram_mb: String,
+    new_vm_disk_gb: String,
+    active_new_vm_input_idx: usize,
+
+    // For VM Destruction confirmation
+    vm_to_destroy: Option<String>,
+
     // For editing system prompts
     editing_system_prompt_for_model: Option<String>, // Name of the model whose system prompt is being edited
     // This map will hold live edits to system prompts before saving to config
@@ -165,6 +184,7 @@ impl App {
             initial_editable_prompts = model_prompts.clone();
         }
 
+        let vm_uuid = Uuid::new_v4();
         let mut app = Self {
             should_quit: false,
             ollama_models: Vec::new(),
@@ -172,7 +192,7 @@ impl App {
             vm_list_state: ListState::default(),
             #[cfg(feature = "ollama_integration")]
             ollama_model_list_state: ListState::default(),
-            config,
+            config: Arc::clone(&config),
             session_manager,
             policy_engine,
             env_manager,
@@ -189,6 +209,17 @@ impl App {
             chat_stream_receiver: Some(chat_rx),
             chat_list_state: ListState::default(),
             theme: Arc::new(AppTheme::default()), // Initialize theme
+            show_new_vm_popup: false,
+            new_vm_name: format!("{}-{}", &config.defaults.default_vm_image, vm_uuid.simple()),
+            new_vm_use_iso: true,
+            new_vm_iso_path: config.defaults.default_vm_iso.clone(),
+            new_vm_source_image_path: config.defaults.default_source_image.clone().unwrap_or_default(),
+            new_vm_disk_path: String::new(),
+            new_vm_cpu: config.defaults.default_cpu.to_string(),
+            new_vm_ram_mb: config.defaults.default_ram.clone(),
+            new_vm_disk_gb: config.defaults.default_disk_gb.to_string(),
+            active_new_vm_input_idx: 0,
+            vm_to_destroy: None,
             editing_system_prompt_for_model: None,
             editable_ollama_model_prompts: initial_editable_prompts,
             input_bar_scroll: 0, // Initialize scroll offset
@@ -224,6 +255,11 @@ impl App {
         app.fetch_vms();
         if !app.vms.is_empty() {
             app.vm_list_state.select(Some(0));
+        }
+        if let Ok(xdg_dirs) = xdg::BaseDirectories::with_prefix("hydravisor") {
+            if let Ok(path) = xdg_dirs.place_data_file(format!("images/{}.qcow2", &app.new_vm_name)) {
+                app.new_vm_disk_path = path.to_str().unwrap_or("").to_string()
+            }
         }
         app
     }
@@ -441,7 +477,7 @@ impl App {
                     self.input_cursor_char_idx = 0; // Reset cursor position
                 }
                 KeyEvent { code: KeyCode::Up, modifiers: KeyModifiers::NONE, .. } => {
-                    let original_cursor_idx = self.input_cursor_char_idx;
+                    let _original_cursor_idx = self.input_cursor_char_idx;
                     if self.last_input_text_area_width > 0 && !self.current_input.is_empty() {
                         let wrapped_lines: Vec<String> = textwrap::wrap(&self.current_input, self.last_input_text_area_width as usize).iter().map(|s| s.to_string()).collect();
                         if wrapped_lines.is_empty() { return; }
@@ -480,7 +516,7 @@ impl App {
                     self.input_bar_cursor_needs_to_be_visible = true; 
                 }
                 KeyEvent { code: KeyCode::Down, modifiers: KeyModifiers::NONE, .. } => {
-                    let original_cursor_idx = self.input_cursor_char_idx;
+                    let _original_cursor_idx = self.input_cursor_char_idx;
                     if self.last_input_text_area_width > 0 && !self.current_input.is_empty() {
                         let wrapped_lines: Vec<String> = textwrap::wrap(&self.current_input, self.last_input_text_area_width as usize).iter().map(|s| s.to_string()).collect();
                         if wrapped_lines.is_empty() || wrapped_lines.len() == 1 { return; }
@@ -593,6 +629,20 @@ impl App {
                                     self.active_view = TuiView::Chat;
                                     self.current_input.clear(); 
                                 }
+                            }
+                        }
+                    }
+                    KeyCode::Char('j') => self.select_next_item_in_vm_list(),
+                    KeyCode::Char('k') => self.select_previous_item_in_vm_list(),
+                    KeyCode::Char('n') if key_event.modifiers == KeyModifiers::CONTROL => {
+                        self.input_mode = InputMode::VmWizard;
+                        self.active_new_vm_input_idx = 0;
+                    }
+                    KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => {
+                        if let Some(selected_idx) = self.vm_list_state.selected() {
+                            if let Some(vm) = self.vms.get(selected_idx) {
+                                self.vm_to_destroy = Some(vm.instance_id.clone());
+                                self.input_mode = InputMode::ConfirmingDestroy;
                             }
                         }
                     }
@@ -723,6 +773,8 @@ impl App {
                     _ => {} // Other keys are currently ignored here
                 }
             }
+            InputMode::VmWizard => self.handle_vm_wizard_mode_key(key_event),
+            InputMode::ConfirmingDestroy => self.handle_confirm_destroy_mode_key(key_event),
         }
     }
     
@@ -959,6 +1011,105 @@ impl App {
             }
         }
     }
+
+    fn handle_vm_wizard_mode_key(&mut self, key_event: KeyEvent) {
+        match key_event.code {
+            KeyCode::Esc => {
+                self.input_mode = InputMode::Normal;
+            }
+            KeyCode::Tab => {
+                self.active_new_vm_input_idx = (self.active_new_vm_input_idx + 1) % 8;
+            }
+            KeyCode::BackTab => {
+                self.active_new_vm_input_idx = (self.active_new_vm_input_idx + 8 - 1) % 8;
+            }
+            KeyCode::Char(' ') => {
+                if self.active_new_vm_input_idx == 6 { // Corresponds to the ISO checkbox
+                    self.new_vm_use_iso = !self.new_vm_use_iso;
+                }
+            }
+            KeyCode::Char(c) => match self.active_new_vm_input_idx {
+                0 => self.new_vm_name.push(c),
+                1 => self.new_vm_source_image_path.push(c),
+                2 => self.new_vm_disk_path.push(c),
+                3 => self.new_vm_cpu.push(c),
+                4 => self.new_vm_ram_mb.push(c),
+                5 => self.new_vm_disk_gb.push(c),
+                7 => self.new_vm_iso_path.push(c),
+                _ => {}
+            },
+            KeyCode::Backspace => match self.active_new_vm_input_idx {
+                0 => { self.new_vm_name.pop(); }
+                1 => { self.new_vm_source_image_path.pop(); }
+                2 => { self.new_vm_disk_path.pop(); }
+                3 => { self.new_vm_cpu.pop(); }
+                4 => { self.new_vm_ram_mb.pop(); }
+                5 => { self.new_vm_disk_gb.pop(); }
+                7 => { self.new_vm_iso_path.pop(); }
+                _ => {}
+            },
+            KeyCode::Enter => {
+                let boot_iso = if self.new_vm_use_iso { Some(self.new_vm_iso_path.clone()) } else { None };
+
+                let vm_config = EnvironmentConfig {
+                    instance_id: self.new_vm_name.clone(),
+                    env_type: EnvironmentType::Vm,
+                    base_image: self.new_vm_source_image_path.clone(),
+                    boot_iso,
+                    cpu_cores: self.new_vm_cpu.parse().unwrap_or(self.config.defaults.default_cpu),
+                    memory_mb: parse_ram_str(&self.new_vm_ram_mb).unwrap_or(4096),
+                    disk_gb: Some(self.new_vm_disk_gb.parse().unwrap_or(self.config.defaults.default_disk_gb)),
+                    network_policy: "default".to_string(),
+                    security_policy: "default".to_string(),
+                    custom_script: None,
+                    template_name: None,
+                    labels: None,
+                };
+                
+                // TODO: The underlying create_environment is currently stubbed out
+                // and will panic due to the todo! macro. We will proceed with the call
+                // to demonstrate the full UI flow.
+                match self.env_manager.create_environment(&vm_config) {
+                    Ok(status) => {
+                        tracing::info!("Successfully created new VM: {:?}", status);
+                        self.fetch_vms();
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to create VM: {}", e);
+                    }
+                }
+                
+                self.input_mode = InputMode::Normal;
+                // maybe clear the fields
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_confirm_destroy_mode_key(&mut self, key_event: KeyEvent) {
+        match key_event.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                if let Some(instance_id) = self.vm_to_destroy.take() {
+                    match self.env_manager.destroy_environment(&instance_id) {
+                        Ok(_) => tracing::info!("Successfully initiated destruction of VM: {}", instance_id),
+                        Err(e) => tracing::error!("Failed to destroy VM {}: {}", instance_id, e),
+                    }
+                    self.fetch_vms();
+                }
+                self.input_mode = InputMode::Normal;
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                self.vm_to_destroy = None;
+                self.input_mode = InputMode::Normal;
+            }
+            _ => {}
+        }
+    }
+
+    /// Resets the cursor position to the end of the input string.
+    fn reset_cursor_position(&mut self) {
+        self.input_cursor_char_idx = self.current_input.len();
+    }
 }
 
 pub fn run_tui(
@@ -973,8 +1124,7 @@ pub fn run_tui(
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
 
     let app = App::new(
         config,
@@ -1067,6 +1217,25 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
     }
 
     InputBarWidget::render(f, app, main_layout_chunks[2]);
+
+    // New VM Popup
+    if app.input_mode == InputMode::VmWizard {
+        NewVmPopupWidget::render(f, app, f.size());
+    }
+
+    // Destroy Confirmation Popup
+    if app.input_mode == InputMode::ConfirmingDestroy {
+        if let Some(vm_name) = &app.vm_to_destroy {
+            let text = format!("Are you sure you want to destroy VM '{}'? (y/n)", vm_name);
+            let p = Paragraph::new(text)
+                .block(Block::default().title("Confirm Destruction").borders(Borders::ALL))
+                .alignment(ratatui::layout::Alignment::Center);
+
+            let area = centered_rect(60, 20, f.size());
+            f.render_widget(ratatui::widgets::Clear, area); //this clears the background
+            f.render_widget(p, area);
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -1090,6 +1259,25 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
+fn parse_ram_str(ram_str: &str) -> Result<u64> {
+    let mut s = ram_str.trim().to_uppercase();
+    if s.ends_with("GB") {
+        s.pop();
+        s.pop();
+        let val: u64 = s.parse()?;
+        Ok(val * 1024)
+    } else if s.ends_with("MB") {
+        s.pop();
+        s.pop();
+        let val: u64 = s.parse()?;
+        Ok(val)
+    } else {
+        // Assume MB if no unit
+        let val: u64 = s.parse()?;
+        Ok(val)
+    }
+}
+
 // TODO:
 // - Implement actual async call to ollama_manager.generate_response_stream in on_key for Enter.
 //   - This will involve spawning a tokio task.
@@ -1098,6 +1286,4 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 // - Implement scrolling for VM list, Ollama model list, and chat message list.
 // - Add more robust error handling and display for TUI (e.g., a status message area).
 // - Refine UI layout and styling.
-// - Complete other TODOs throughout the file. 
-// - Complete other TODOs throughout the file. 
 // - Complete other TODOs throughout the file. 

@@ -75,6 +75,10 @@ impl Default for InterfaceConfig {
 pub struct DefaultsConfig {
     #[serde(default = "default_vm_image")]
     pub default_vm_image: String,
+    #[serde(default = "default_vm_iso")]
+    pub default_vm_iso: String,
+    #[serde(default)]
+    pub default_source_image: Option<String>,
     #[serde(default = "default_container_image")]
     pub default_container_image: String,
     #[serde(default = "default_model")]
@@ -83,16 +87,21 @@ pub struct DefaultsConfig {
     pub default_cpu: u32,
     #[serde(default = "default_ram")]
     pub default_ram: String, // e.g., "4GB"
+    #[serde(default = "default_disk_gb")]
+    pub default_disk_gb: u64,
 }
 
 fn default_vm_image() -> String {
-    "ubuntu-22.04".to_string()
+    "archlinux-2025.04.01".to_string()
+}
+fn default_vm_iso() -> String {
+    "/mnt/DiskImages/archlinux-2025.04.01-x86_64.iso".to_string()
 }
 fn default_container_image() -> String {
     "ghcr.io/hydravisor/agent:latest".to_string()
 }
 fn default_model() -> String {
-    "ollama:llama3".to_string()
+    "ollama:qwen3".to_string()
 }
 fn default_cpu() -> u32 {
     2
@@ -100,15 +109,21 @@ fn default_cpu() -> u32 {
 fn default_ram() -> String {
     "4GB".to_string()
 }
+fn default_disk_gb() -> u64 {
+    20
+}
 
 impl Default for DefaultsConfig {
     fn default() -> Self {
         DefaultsConfig {
             default_vm_image: default_vm_image(),
+            default_vm_iso: default_vm_iso(),
+            default_source_image: None,
             default_container_image: default_container_image(),
             default_model: default_model(),
             default_cpu: default_cpu(),
             default_ram: default_ram(),
+            default_disk_gb: default_disk_gb(),
         }
     }
 }

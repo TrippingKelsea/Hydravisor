@@ -29,6 +29,8 @@ impl StatusBarWidget {
         let view_mode_bg = match app.input_mode {
             InputMode::Normal => theme.status_bar_mode_normal_bg,
             InputMode::Editing => theme.status_bar_mode_editing_bg,
+            InputMode::VmWizard => theme.status_bar_mode_vm_wizard_bg,
+            InputMode::ConfirmingDestroy => theme.status_bar_mode_confirm_destroy_bg,
         };
 
         let status_spans_left = Line::from(vec![

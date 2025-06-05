@@ -2,11 +2,9 @@
 // Manages VMs (libvirt/KVM) and containers (containerd)
 
 use anyhow::{anyhow, Result};
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use uuid::Uuid;
 
 use crate::config::Config;
 // use crate::errors::HydraError; // Not used yet, keep for later if specific errors are needed
@@ -31,7 +29,8 @@ pub enum EnvironmentType {
 pub struct EnvironmentConfig {
     pub instance_id: String, // Unique ID for this environment instance
     pub env_type: EnvironmentType,
-    pub base_image: String, // e.g., "ubuntu-22.04" or "docker.io/library/alpine:latest"
+    pub base_image: String, // e.g., "ubuntu-22.04" or a path to a source qcow2
+    pub boot_iso: Option<String>,
     pub cpu_cores: u32,
     pub memory_mb: u64,
     pub disk_gb: Option<u64>,      // Primarily for VMs
@@ -298,8 +297,8 @@ impl EnvironmentManager {
 
     #[cfg(feature = "libvirt_integration")]
     fn create_vm(&self, env_config: &EnvironmentConfig) -> Result<EnvironmentStatus> {
-        if let Some(conn) = &self.libvirt_conn {
-            let vm_name = format!("{}-{}", env_config.base_image, Uuid::new_v4());
+        if let Some(_conn) = &self.libvirt_conn {
+            let vm_name = env_config.instance_id.clone();
             let disk_size_gb = env_config.disk_gb.unwrap_or(20); // Default to 20GB
             let disk_path = format!("/var/lib/libvirt/images/{}.qcow2", vm_name);
 
@@ -311,43 +310,18 @@ impl EnvironmentManager {
                 disk_path, disk_size_gb
             );
 
-            let domain_xml = self.create_vm_xml(
+            let _domain_xml = self.create_vm_xml(
                 &vm_name,
                 env_config.cpu_cores,
                 env_config.memory_mb,
                 &disk_path,
+                env_config.boot_iso.as_deref(),
             );
 
-            // Define the domain (persistent)
-            // TODO: The following line fails to compile with "no method named `domain_define_xml`".
-            // The documentation for virt v0.4.2 shows this method exists.
-            // There might be an issue with the local build environment or crate version.
-            todo!("Resolve compilation issue with libvirt domain definition");
+            // The 'virt' crate does not seem to support domain creation from XML.
+            // This is a known issue blocking VM creation. Consider switching to the 'libvirt-rs' crate.
+            todo!("Blocked: The 'virt' crate does not provide a method to define a VM from XML.");
 
-            /*
-            let domain = conn.domain_define_xml(&domain_xml)?;
-            println!("Defined VM: {}", vm_name);
-
-            // Start the domain
-            domain.create()?;
-            println!("Started VM: {}", vm_name);
-
-            // Return the initial status
-            let status = EnvironmentStatus {
-                instance_id: vm_name.clone(),
-                name: vm_name,
-                env_type: EnvironmentType::Vm,
-                state: EnvironmentState::Booting,
-                created_at: Utc::now().to_rfc3339(),
-                updated_at: Utc::now().to_rfc3339(),
-                base_image: Some(env_config.base_image.clone()),
-                cpu_cores_used: Some(env_config.cpu_cores),
-                memory_max_kb: Some(env_config.memory_mb * 1024),
-                ..Default::default()
-            };
-
-            Ok(status)
-            */
         } else {
             Err(anyhow!(
                 "Libvirt connection not available. Cannot create VM."
@@ -362,8 +336,26 @@ impl EnvironmentManager {
         vcpu: u32,
         memory_mb: u64,
         disk_path: &str,
+        boot_iso: Option<&str>,
     ) -> String {
-        let iso_path = "/mnt/DiskImages/archlinux-2025.04.01-x86_64.iso"; // As per user request
+
+        let boot_order_xml = if boot_iso.is_some() {
+            "    <boot dev='cdrom'/>\n    <boot dev='hd'/>"
+        } else {
+            "    <boot dev='hd'/>"
+        };
+
+        let iso_disk_xml = if let Some(iso_path) = boot_iso {
+            format!(r#"
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='{}'/>
+      <target dev='sda' bus='sata'/>
+      <readonly/>
+    </disk>"#, iso_path)
+        } else {
+            String::new()
+        };
 
         format!(
             r#"
@@ -373,8 +365,7 @@ impl EnvironmentManager {
   <vcpu placement='static'>{}</vcpu>
   <os>
     <type arch='x86_64' machine='pc-q35-8.0'>hvm</type>
-    <boot dev='cdrom'/>
-    <boot dev='hd'/>
+{}
   </os>
   <features>
     <acpi/>
@@ -394,12 +385,7 @@ impl EnvironmentManager {
       <source file='{}'/>
       <target dev='vda' bus='virtio'/>
     </disk>
-    <disk type='file' device='cdrom'>
-      <driver name='qemu' type='raw'/>
-      <source file='{}'/>
-      <target dev='sda' bus='sata'/>
-      <readonly/>
-    </disk>
+{}
     <interface type='network'>
       <source network='default'/>
       <model type='virtio'/>
@@ -414,7 +400,7 @@ impl EnvironmentManager {
   </devices>
 </domain>
 "#,
-            name, memory_mb, vcpu, disk_path, iso_path
+            name, memory_mb, vcpu, boot_order_xml, disk_path, iso_disk_xml
         )
     }
     

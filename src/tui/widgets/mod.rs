@@ -4,6 +4,7 @@ pub mod vm_list;
 pub mod ollama_model_list;
 pub mod chat;
 pub mod logs;
+pub mod new_vm_popup;
 
 // We can re-export widget structs here later, e.g.:
 // pub use status_bar::StatusBarWidget;
