@@ -20,7 +20,7 @@ tracing-appender = "0.2"
 xdg = "2.5.2"
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.7.0", features = ["v4", "serde"] }
+uuid = { version = "1.8.0", features = ["v4", "serde"] }
 shellexpand = "3.1.0"
 jsonschema = "0.17.1"
 virt = { version = "0.4.2", optional = true }

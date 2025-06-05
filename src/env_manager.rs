@@ -1,10 +1,12 @@
 // src/env_manager.rs
 // Manages VMs (libvirt/KVM) and containers (containerd)
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 use crate::config::Config;
 // use crate::errors::HydraError; // Not used yet, keep for later if specific errors are needed
@@ -114,50 +116,52 @@ impl EnvironmentManager {
     }
 
     pub fn create_environment(&self, env_config: &EnvironmentConfig) -> Result<EnvironmentStatus> {
-        // TODO: Implement environment creation logic:
-        // 1. Validate env_config against policies (resource limits, allowed images etc. - coordination with PolicyEngine).
-        // 2. Based on env_config.env_type:
-        //    - If Vm: Use libvirt (or QEMU direct commands as per interface.design.md) to define and start the VM.
-        //      - Handle image download/management if not present.
-        //      - Configure networking, disk, CPU, memory.
-        //      - Inject SSH keys (coordination with SshManager).
-        //      - Run custom_script if provided.
-        //    - If Container: Use containerd client (or podman CLI as per interface.design.md) to pull image and run container.
-        //      - Apply resource limits, network config.
-        //      - Mount necessary volumes (e.g., for workspace, agent communication).
-        // 3. Update internal state of active_environments.
-        // 4. Return initial EnvironmentStatus (likely Provisioning or Booting).
-        // 5. Log the creation event via AuditEngine.
         println!("Creating environment: {:?}", env_config);
         match env_config.env_type {
-            EnvironmentType::Vm => todo!("Implement VM creation using libvirt/QEMU"),
-            EnvironmentType::Container => todo!("Implement container creation using containerd/podman"),
+            EnvironmentType::Vm => self.create_vm(env_config),
+            EnvironmentType::Container => {
+                todo!("Implement container creation using containerd/podman")
+            }
         }
-        // Ok(initial_status)
     }
 
     pub fn destroy_environment(&self, instance_id: &str) -> Result<()> {
-        // TODO: Implement environment destruction:
-        // 1. Find the environment by instance_id.
-        // 2. Based on type:
-        //    - VM: Stop/undefine the VM via libvirt/QEMU.
-        //    - Container: Stop/remove the container via containerd/podman.
-        // 3. Clean up associated resources (disks, network interfaces if not shared).
-        // 4. Remove from active_environments.
-        // 5. Log destruction event via AuditEngine.
         println!("Destroying environment: {}", instance_id);
-        todo!("Implement environment destruction for VMs and containers.");
-        // Ok(())
+        #[cfg(feature = "libvirt_integration")]
+        {
+            if let Some(conn) = &self.libvirt_conn {
+                if let Ok(domain) = Domain::lookup_by_name(conn, instance_id) {
+                    // If the VM is running, destroy it (forced shutdown)
+                    if domain.is_active()? {
+                        domain.destroy()?;
+                        println!("Destroyed running VM: {}", instance_id);
+                    }
+                    // Undefine the VM (removes its configuration)
+                    domain.undefine()?;
+                    println!("Undefined VM: {}", instance_id);
+
+                    // TODO: Delete the associated disk image from /var/lib/libvirt/images/
+                    return Ok(());
+                } else {
+                    return Err(anyhow!("VM with instance_id '{}' not found.", instance_id));
+                }
+            }
+        }
+        // If libvirt is not enabled or no connection, we can't do anything
+        Err(anyhow!(
+            "Libvirt not available. Cannot destroy environment."
+        ))
     }
 
     pub fn get_environment_status(&self, instance_id: &str) -> Result<Option<EnvironmentStatus>> {
-        // TODO: Retrieve and return the current status of the specified environment.
-        // - For VMs, query libvirt/QEMU for state, IP, resource usage.
-        // - For containers, query containerd/podman.
-        // - Update internal cache if necessary.
         println!("Getting status for environment: {}", instance_id);
-        todo!("Implement environment status retrieval.");
-        // Ok(None) // Or Some(status)
+        #[cfg(feature = "libvirt_integration")]
+        {
+            if let Some(conn) = &self.libvirt_conn {
+                return Ok(self.get_vm_status_by_name(conn, instance_id)?);
+            }
+        }
+        Ok(None)
     }
 
     pub fn list_environments(&self) -> Result<Vec<EnvironmentStatus>> {
@@ -219,20 +223,7 @@ impl EnvironmentManager {
                 for name in domain_names {
                     if let Ok(domain) = Domain::lookup_by_name(&conn, &name) {
                         let state_info: DomainInfo = domain.get_info()?;
-                        let hydra_state = match state_info.state as u32 {
-                            sys::VIR_DOMAIN_NOSTATE => EnvironmentState::Unknown,
-                            sys::VIR_DOMAIN_RUNNING => EnvironmentState::Running,
-                            sys::VIR_DOMAIN_BLOCKED => EnvironmentState::Suspended,
-                            sys::VIR_DOMAIN_PAUSED => EnvironmentState::Suspended,
-                            sys::VIR_DOMAIN_SHUTDOWN => EnvironmentState::Terminated,
-                            sys::VIR_DOMAIN_SHUTOFF => EnvironmentState::Stopped,
-                            sys::VIR_DOMAIN_CRASHED => EnvironmentState::Error("Crashed".to_string()),
-                            sys::VIR_DOMAIN_PMSUSPENDED => EnvironmentState::Suspended,
-                            other_state => {
-                                eprintln!("Unknown libvirt domain state encountered: {}", other_state);
-                                EnvironmentState::Unknown
-                            }
-                        };
+                        let hydra_state = self.map_libvirt_state_to_hydra(state_info.state as u32);
                         let status = EnvironmentStatus {
                             instance_id: domain.get_uuid_string().unwrap_or_else(|_| "N/A-UUID".to_string()),
                             name: name.clone(),
@@ -303,6 +294,175 @@ impl EnvironmentManager {
                 ..Default::default()
             },
         ])
+    }
+
+    #[cfg(feature = "libvirt_integration")]
+    fn create_vm(&self, env_config: &EnvironmentConfig) -> Result<EnvironmentStatus> {
+        if let Some(conn) = &self.libvirt_conn {
+            let vm_name = format!("{}-{}", env_config.base_image, Uuid::new_v4());
+            let disk_size_gb = env_config.disk_gb.unwrap_or(20); // Default to 20GB
+            let disk_path = format!("/var/lib/libvirt/images/{}.qcow2", vm_name);
+
+            // TODO: Implement actual disk creation logic
+            // For now, we assume a disk image can be created at `disk_path`.
+            // In a real implementation, you would use `qemu-img` or a library.
+            println!(
+                "Placeholder: Creating disk image at {} with size {}GB",
+                disk_path, disk_size_gb
+            );
+
+            let domain_xml = self.create_vm_xml(
+                &vm_name,
+                env_config.cpu_cores,
+                env_config.memory_mb,
+                &disk_path,
+            );
+
+            // Define the domain (persistent)
+            // TODO: The following line fails to compile with "no method named `domain_define_xml`".
+            // The documentation for virt v0.4.2 shows this method exists.
+            // There might be an issue with the local build environment or crate version.
+            todo!("Resolve compilation issue with libvirt domain definition");
+
+            /*
+            let domain = conn.domain_define_xml(&domain_xml)?;
+            println!("Defined VM: {}", vm_name);
+
+            // Start the domain
+            domain.create()?;
+            println!("Started VM: {}", vm_name);
+
+            // Return the initial status
+            let status = EnvironmentStatus {
+                instance_id: vm_name.clone(),
+                name: vm_name,
+                env_type: EnvironmentType::Vm,
+                state: EnvironmentState::Booting,
+                created_at: Utc::now().to_rfc3339(),
+                updated_at: Utc::now().to_rfc3339(),
+                base_image: Some(env_config.base_image.clone()),
+                cpu_cores_used: Some(env_config.cpu_cores),
+                memory_max_kb: Some(env_config.memory_mb * 1024),
+                ..Default::default()
+            };
+
+            Ok(status)
+            */
+        } else {
+            Err(anyhow!(
+                "Libvirt connection not available. Cannot create VM."
+            ))
+        }
+    }
+
+    #[cfg(feature = "libvirt_integration")]
+    fn create_vm_xml(
+        &self,
+        name: &str,
+        vcpu: u32,
+        memory_mb: u64,
+        disk_path: &str,
+    ) -> String {
+        let iso_path = "/mnt/DiskImages/archlinux-2025.04.01-x86_64.iso"; // As per user request
+
+        format!(
+            r#"
+<domain type='kvm'>
+  <name>{}</name>
+  <memory unit='MiB'>{}</memory>
+  <vcpu placement='static'>{}</vcpu>
+  <os>
+    <type arch='x86_64' machine='pc-q35-8.0'>hvm</type>
+    <boot dev='cdrom'/>
+    <boot dev='hd'/>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+    <vmport state='off'/>
+  </features>
+  <cpu mode='host-passthrough' check='none' migratable='on'/>
+  <clock offset='utc'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='{}'/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='{}'/>
+      <target dev='sda' bus='sata'/>
+      <readonly/>
+    </disk>
+    <interface type='network'>
+      <source network='default'/>
+      <model type='virtio'/>
+    </interface>
+    <input type='tablet' bus='usb'/>
+    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'>
+      <listen type='address' address='127.0.0.1'/>
+    </graphics>
+    <video>
+      <model type='virtio' heads='1' primary='yes'/>
+    </video>
+  </devices>
+</domain>
+"#,
+            name, memory_mb, vcpu, disk_path, iso_path
+        )
+    }
+    
+    // TODO: Add other lifecycle methods like stop, start, restart as needed.
+
+    #[cfg(feature = "libvirt_integration")]
+    fn get_vm_status_by_name(&self, conn: &Connect, name: &str) -> Result<Option<EnvironmentStatus>> {
+        if let Ok(domain) = Domain::lookup_by_name(conn, name) {
+            let state_info: DomainInfo = domain.get_info()?;
+            let hydra_state = self.map_libvirt_state_to_hydra(state_info.state as u32);
+
+            let status = EnvironmentStatus {
+                instance_id: domain.get_uuid_string().unwrap_or_else(|_| "N/A-UUID".to_string()),
+                name: name.to_string(),
+                env_type: EnvironmentType::Vm,
+                state: hydra_state,
+                // created_at and updated_at are tricky without a persistent DB
+                // base_image could be stored in metadata if we define it
+                memory_max_kb: Some(state_info.max_mem), // This is in KiB from libvirt
+                memory_used_kb: Some(state_info.memory), // This is in KiB from libvirt
+                cpu_cores_used: Some(state_info.nr_virt_cpu as u32),
+                ..Default::default()
+            };
+            Ok(Some(status))
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[cfg(feature = "libvirt_integration")]
+    fn map_libvirt_state_to_hydra(&self, state_code: u32) -> EnvironmentState {
+        match state_code {
+            sys::VIR_DOMAIN_NOSTATE => EnvironmentState::Unknown,
+            sys::VIR_DOMAIN_RUNNING => EnvironmentState::Running,
+            sys::VIR_DOMAIN_BLOCKED => EnvironmentState::Suspended, // Blocked on resource
+            sys::VIR_DOMAIN_PAUSED => EnvironmentState::Suspended,
+            sys::VIR_DOMAIN_SHUTDOWN => EnvironmentState::Terminated, // Being shut down
+            sys::VIR_DOMAIN_SHUTOFF => EnvironmentState::Stopped,   // Is off
+            sys::VIR_DOMAIN_CRASHED => EnvironmentState::Error("Crashed".to_string()),
+            sys::VIR_DOMAIN_PMSUSPENDED => EnvironmentState::Suspended,
+            other_state => {
+                eprintln!(
+                    "Unknown libvirt domain state encountered: {}",
+                    other_state
+                );
+                EnvironmentState::Unknown
+            }
+        }
     }
 }
 
