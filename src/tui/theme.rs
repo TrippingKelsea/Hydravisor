@@ -53,6 +53,8 @@ pub struct AppTheme {
     pub chat_thought_style: Style,
     pub chat_timestamp: Style,
     pub chat_streaming_indicator: Color, // For the "..." or similar
+    pub chat_model_content_style: Style,       // New: For model's main text content
+    pub chat_model_content_use_background: bool, // New: Toggle for model text background
 
     // Log View
     pub log_title: Style,
@@ -76,7 +78,7 @@ impl Default for AppTheme {
             border_primary: Color::DarkGray,
             border_secondary: Color::LightCyan, // Example for active borders
             border_accent: Color::Cyan,
-            highlight_style: Style::default().add_modifier(Modifier::REVERSED),
+            highlight_style: Style::default(), // New: No visual change for highlight
             error_text: Color::Red,
             warning_text: Color::Yellow,
             success_text: Color::Green,
@@ -119,6 +121,8 @@ impl Default for AppTheme {
             chat_thought_style: Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC),
             chat_timestamp: Style::default().fg(Color::DarkGray), // Keep it subtle
             chat_streaming_indicator: Color::LightYellow,
+            chat_model_content_style: Style::default().fg(Color::Rgb(220, 220, 220)), // Default: Light gray text, no background
+            chat_model_content_use_background: false, // Default: No background for model text
 
             // Log View
             log_title: Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),

@@ -29,6 +29,7 @@ futures = "0.3" # For block_on
 log = "0.4" # For log::LevelFilter used by tui-logger
 unicode-width = "0.1.11" # Added for text wrapping in TUI
 textwrap = "0.16" # Added for better text wrapping
+strip-ansi-escapes = "0.2.0" # For sanitizing model output
 
 # Placeholder for potential future dependencies from design docs
 # libvirt-rs = { version = "0.7", optional = true } # For KVM

@@ -2,7 +2,7 @@
 // use chrono::Local; // Removed unused import
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect}, // Removed Alignment
-    style::{Style, Stylize},
+    style::{Color, Style, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
@@ -113,9 +113,21 @@ impl ChatWidget {
                         lines_for_list_item.push(Line::from("")); // Blank line after sender/timestamp, before content
                     }
                     
+                    // ---- START REVERT DIAGNOSTIC FOR TEXT ----
+                    let final_text_style = if msg.sender != "user" {
+                        let mut model_text_style = theme.chat_model_content_style.clone();
+                        if !theme.chat_model_content_use_background {
+                            model_text_style = model_text_style.bg(Color::Reset);
+                        }
+                        model_text_style
+                    } else {
+                        Style::default().fg(theme.primary_foreground)
+                    };
+                    // ---- END REVERT DIAGNOSTIC FOR TEXT ----
+
                     let wrapped_content_lines: Vec<Line> = textwrap::fill(&current_content_str, content_width)
                         .lines()
-                        .map(|line_str| Line::from(Span::styled(line_str.to_string(), Style::default().fg(theme.primary_foreground))))
+                        .map(|line_str| Line::from(Span::styled(line_str.to_string(), final_text_style)))
                         .collect();
                     lines_for_list_item.extend(wrapped_content_lines);
                 } else if current_content_str.is_empty() && msg.thought.is_some() && !msg.thought.as_ref().unwrap_or(&String::new()).is_empty() {
@@ -129,8 +141,11 @@ impl ChatWidget {
                 ListItem::new(Text::from(lines_for_list_item))
             }).collect();
             
+            // ---- START REVERT DIAGNOSTIC FOR LIST ----
             let chat_list = List::new(message_items)
-                .highlight_style(theme.highlight_style.clone())
+                .style(Style::default()) // Revert list background to default/transparent
+                .highlight_style(theme.highlight_style.clone()) // Restore theme highlight style
+            // ---- END REVERT DIAGNOSTIC FOR LIST ----
                 .highlight_symbol("> ");
 
             f.render_stateful_widget(chat_list, messages_area, &mut app.chat_list_state);

@@ -683,16 +683,22 @@ impl App {
                         ChatStreamEvent::Chunk(chunk) => {
                             if chat_session.is_streaming {
                                 if let Some(last_message) = chat_session.messages.last_mut() {
-                                    last_message.content.push_str(&chunk);
+                                    // Sanitize the chunk before appending
+                                    let mut sanitized_chunk = strip_ansi_escapes::strip_str(&chunk);
+                                    // Explicitly remove form feed characters
+                                    sanitized_chunk = sanitized_chunk.replace('\u{000C}', ""); 
+                                    last_message.content.push_str(&sanitized_chunk);
                                 }
                             }
                         }
                         ChatStreamEvent::Error(error_msg) => {
                             if let Some(last_message) = chat_session.messages.last_mut() {
+                                let mut sanitized_error = strip_ansi_escapes::strip_str(&error_msg);
+                                sanitized_error = sanitized_error.replace('\u{000C}', "");
                                 if last_message.content.is_empty() || chat_session.is_streaming {
-                                    last_message.content = format!("[Error] {}", error_msg);
+                                    last_message.content = format!("[Error] {}", sanitized_error);
                                 } else {
-                                    last_message.content.push_str(&format!("\n[Error] {}", error_msg));
+                                    last_message.content.push_str(&format!("\n[Error] {}", sanitized_error));
                                 }
                             }
                             chat_session.is_streaming = false;
@@ -701,19 +707,22 @@ impl App {
                             chat_session.is_streaming = false;
                             if let Some(last_message) = chat_session.messages.last_mut() {
                                 if last_message.sender != "user" { // Only process assistant messages
-                                    let mut new_content = last_message.content.clone();
+                                    let mut new_content = last_message.content.clone(); // Already sanitized for ANSI and form feed by chunks
                                     let mut thought_text: Option<String> = None;
 
                                     if let Some(start_think) = new_content.find("<think>") {
                                         if let Some(end_think) = new_content.rfind("</think>") {
                                             if start_think < end_think && new_content.starts_with("<think>") {
-                                                thought_text = Some(new_content[start_think + "<think>".len()..end_think].to_string());
+                                                let raw_thought = new_content[start_think + "<think>".len()..end_think].to_string();
+                                                let mut sanitized_thought = strip_ansi_escapes::strip_str(&raw_thought);
+                                                sanitized_thought = sanitized_thought.replace('\u{000C}', "");
+                                                thought_text = Some(sanitized_thought);
                                                 new_content = new_content[end_think + "</think>".len()..].trim_start().to_string();
                                             }
                                         }
                                     }
                                     last_message.thought = thought_text;
-                                    last_message.content = new_content;
+                                    last_message.content = new_content; 
                                 }
                             }
                         }
@@ -848,7 +857,7 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
         .constraints([
             Constraint::Length(1), // For Status Bar
             Constraint::Min(0),    // For Main Content Area
-            Constraint::Length(3), // For Input Bar
+            Constraint::Length(4), // For Input Bar - Increased from 3 to 4 for 2 lines of text
         ].as_ref())
         .split(f.size());
 
