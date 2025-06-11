@@ -400,6 +400,10 @@ impl App {
     }
 
     pub fn select_next_item_in_vm_list(&mut self) {
+        if self.vms.is_empty() {
+            self.vm_list_state.select(None);
+            return;
+        }
         let i = match self.vm_list_state.selected() {
             Some(i) => {
                 if i >= self.vms.len() - 1 {
@@ -414,6 +418,10 @@ impl App {
     }
 
     pub fn select_previous_item_in_vm_list(&mut self) {
+        if self.vms.is_empty() {
+            self.vm_list_state.select(None);
+            return;
+        }
         let i = match self.vm_list_state.selected() {
             Some(i) => {
                 if i == 0 {
@@ -429,6 +437,10 @@ impl App {
 
     #[cfg(feature = "ollama_integration")]
     pub fn select_next_item_in_ollama_list(&mut self) {
+        if self.ollama_models.is_empty() {
+            self.ollama_model_list_state.select(None);
+            return;
+        }
         let i = match self.ollama_model_list_state.selected() {
             Some(i) => {
                 if i >= self.ollama_models.len() - 1 {
@@ -444,6 +456,10 @@ impl App {
 
     #[cfg(feature = "ollama_integration")]
     pub fn select_previous_item_in_ollama_list(&mut self) {
+        if self.ollama_models.is_empty() {
+            self.ollama_model_list_state.select(None);
+            return;
+        }
         let i = match self.ollama_model_list_state.selected() {
             Some(i) => {
                 if i == 0 {
@@ -500,6 +516,10 @@ impl App {
 
     #[cfg(feature = "bedrock_integration")]
     pub fn select_next_item_in_bedrock_list(&mut self) {
+        if self.bedrock_models.is_empty() {
+            self.bedrock_model_list_state.select(None);
+            return;
+        }
         let i = match self.bedrock_model_list_state.selected() {
             Some(i) => {
                 if i >= self.bedrock_models.len() - 1 {
@@ -515,6 +535,10 @@ impl App {
 
     #[cfg(feature = "bedrock_integration")]
     pub fn select_previous_item_in_bedrock_list(&mut self) {
+        if self.bedrock_models.is_empty() {
+            self.bedrock_model_list_state.select(None);
+            return;
+        }
         let i = match self.bedrock_model_list_state.selected() {
             Some(i) => {
                 if i == 0 {
