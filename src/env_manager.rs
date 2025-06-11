@@ -4,7 +4,6 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use crate::config::Config;
 // use crate::errors::HydraError; // Not used yet, keep for later if specific errors are needed
@@ -88,27 +87,11 @@ impl EnvironmentManager {
     pub fn new(app_config: &Config) -> Result<Self> {
         #[cfg(feature = "libvirt_integration")]
         let (libvirt_conn, libvirt_connected) = match Connect::open(Some("qemu:///system")) {
-            Ok(conn) => {
-                println!("Successfully connected to libvirt daemon (qemu:///system).");
-                (Some(conn), true)
-            }
-            Err(e) => {
-                eprintln!(
-                    "Failed to connect to libvirt (qemu:///system): {}. Live VM data will not be available.",
-                    e
-                );
-                (None, false)
-            }
+            Ok(conn) => (Some(conn), true),
+            Err(_e) => (None, false),
         };
         #[cfg(not(feature = "libvirt_integration"))]
         let (libvirt_conn, libvirt_connected): (Option<Connect>, bool) = (None, false); // Ensure libvirt_conn is defined even if feature is off
-
-
-        println!(
-            "EnvironmentManager initialized. VM Provider support: {}. Container Provider support: TODO. Config: {:?}",
-            if cfg!(feature = "libvirt_integration") { "libvirt" } else { "None" },
-            app_config.providers
-        );
 
         Ok(EnvironmentManager {
             #[cfg(feature = "libvirt_integration")]
@@ -129,7 +112,6 @@ impl EnvironmentManager {
     }
 
     pub fn create_environment(&self, env_config: &EnvironmentConfig) -> Result<EnvironmentStatus> {
-        println!("Creating environment: {:?}", env_config);
         match env_config.env_type {
             EnvironmentType::Vm => self.create_vm(env_config),
             EnvironmentType::Container => {
@@ -139,7 +121,6 @@ impl EnvironmentManager {
     }
 
     pub fn destroy_environment(&self, instance_id: &str) -> Result<()> {
-        println!("Destroying environment: {}", instance_id);
         #[cfg(feature = "libvirt_integration")]
         {
             if let Some(conn) = &self.libvirt_conn {
@@ -147,11 +128,9 @@ impl EnvironmentManager {
                     // If the VM is running, destroy it (forced shutdown)
                     if domain.is_active()? {
                         domain.destroy()?;
-                        println!("Destroyed running VM: {}", instance_id);
                     }
                     // Undefine the VM (removes its configuration)
                     domain.undefine()?;
-                    println!("Undefined VM: {}", instance_id);
 
                     // TODO: Delete the associated disk image from /var/lib/libvirt/images/
                     return Ok(());
@@ -166,45 +145,13 @@ impl EnvironmentManager {
         ))
     }
 
-    pub fn get_environment_status(&self, instance_id: &str) -> Result<Option<EnvironmentStatus>> {
-        println!("Getting status for environment: {}", instance_id);
-        #[cfg(feature = "libvirt_integration")]
-        {
-            if let Some(conn) = &self.libvirt_conn {
-                return Ok(self.get_vm_status_by_name(conn, instance_id)?);
-            }
-        }
-        Ok(None)
-    }
-
     pub fn list_environments(&self) -> Result<Vec<EnvironmentStatus>> {
-        // TODO: List all managed environments and their current statuses.
-        println!("Listing all environments.");
-        todo!("Implement listing of all environments.");
-        // Ok(Vec::new())
-    }
-
-    pub fn snapshot_environment(&self, instance_id: &str, snapshot_name: &str, output_path: Option<PathBuf>) -> Result<String> {
-        // TODO: Implement snapshotting for VMs (primarily).
-        // - Use libvirt/QEMU snapshot capabilities.
-        // - Store snapshot metadata.
-        // - Optionally export to output_path (as per CLI design for `vm snapshot`).
-        // - Log event.
-        println!("Snapshotting environment: {} to name: {}, output: {:?}", instance_id, snapshot_name, output_path);
-        todo!("Implement VM snapshotting.");
-        // Ok("snapshot_id_or_path".to_string())
-    }
-
-    pub fn pause_environment(&self, instance_id: &str) -> Result<()> {
-        // TODO: Implement pausing for VMs/containers that support it.
-        println!("Pausing environment: {}", instance_id);
-        todo!("Implement environment pausing.");
-        // Ok(())
+        // For now, "environments" are just VMs. This can be expanded later.
+        self.list_vms()
     }
 
     pub fn resume_environment(&self, instance_id: &str) -> Result<()> {
         // TODO: Implement resuming for paused VMs/containers.
-        println!("Resuming environment: {}", instance_id);
         todo!("Implement environment resuming.");
         // Ok(())
     }
@@ -250,19 +197,15 @@ impl EnvironmentManager {
                         vms.push(status);
                     }
                 }
-                println!("Successfully fetched {} VMs from libvirt.", vms.len());
                 return Ok(vms); // Return live data
             } else {
                 // Libvirt connection failed or was None initially
-                eprintln!("Libvirt connection not available for fetching VMs.");
                 #[cfg(feature = "dummy_env_data")]
                 {
-                    println!("Falling back to dummy VM data because 'dummy_env_data' feature is enabled.");
                     return self.list_vms_placeholder();
                 }
                 #[cfg(not(feature = "dummy_env_data"))]
                 {
-                    println!("Returning empty VM list because 'dummy_env_data' feature is not enabled.");
                     return Ok(Vec::new()); // Return empty list if dummy data is not enabled
                 }
             }
@@ -270,15 +213,12 @@ impl EnvironmentManager {
         
         #[cfg(not(feature = "libvirt_integration"))]
         {
-            println!("Libvirt integration feature not enabled.");
             #[cfg(feature = "dummy_env_data")]
             {
-                println!("Falling back to dummy VM data because 'dummy_env_data' feature is enabled.");
                 return self.list_vms_placeholder();
             }
             #[cfg(not(feature = "dummy_env_data"))]
             {
-                println!("Returning empty VM list because 'dummy_env_data' feature is not enabled and libvirt is off.");
                 return Ok(Vec::new());
             }
         }
@@ -319,10 +259,6 @@ impl EnvironmentManager {
             // TODO: Implement actual disk creation logic
             // For now, we assume a disk image can be created at `disk_path`.
             // In a real implementation, you would use `qemu-img` or a library.
-            println!(
-                "Placeholder: Creating disk image at {} with size {}GB",
-                disk_path, disk_size_gb
-            );
 
             let _domain_xml = self.create_vm_xml(
                 &vm_name,
@@ -421,30 +357,6 @@ impl EnvironmentManager {
     // TODO: Add other lifecycle methods like stop, start, restart as needed.
 
     #[cfg(feature = "libvirt_integration")]
-    fn get_vm_status_by_name(&self, conn: &Connect, name: &str) -> Result<Option<EnvironmentStatus>> {
-        if let Ok(domain) = Domain::lookup_by_name(conn, name) {
-            let state_info: DomainInfo = domain.get_info()?;
-            let hydra_state = self.map_libvirt_state_to_hydra(state_info.state as u32);
-
-            let status = EnvironmentStatus {
-                instance_id: domain.get_uuid_string().unwrap_or_else(|_| "N/A-UUID".to_string()),
-                name: name.to_string(),
-                env_type: EnvironmentType::Vm,
-                state: hydra_state,
-                // created_at and updated_at are tricky without a persistent DB
-                // base_image could be stored in metadata if we define it
-                memory_max_kb: Some(state_info.max_mem), // This is in KiB from libvirt
-                memory_used_kb: Some(state_info.memory), // This is in KiB from libvirt
-                cpu_cores_used: Some(state_info.nr_virt_cpu as u32),
-                ..Default::default()
-            };
-            Ok(Some(status))
-        } else {
-            Ok(None)
-        }
-    }
-
-    #[cfg(feature = "libvirt_integration")]
     fn map_libvirt_state_to_hydra(&self, state_code: u32) -> EnvironmentState {
         match state_code {
             sys::VIR_DOMAIN_NOSTATE => EnvironmentState::Unknown,
@@ -456,10 +368,6 @@ impl EnvironmentManager {
             sys::VIR_DOMAIN_CRASHED => EnvironmentState::Error("Crashed".to_string()),
             sys::VIR_DOMAIN_PMSUSPENDED => EnvironmentState::Suspended,
             other_state => {
-                eprintln!(
-                    "Unknown libvirt domain state encountered: {}",
-                    other_state
-                );
                 EnvironmentState::Unknown
             }
         }

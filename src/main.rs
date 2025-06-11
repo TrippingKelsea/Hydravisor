@@ -215,7 +215,7 @@ async fn main() -> Result<()> {
         // Launch TUI if no subcommand and not headless
         info!("No subcommand provided and not headless, launching TUI.");
         crate::tui::run_tui(
-            &tokio::runtime::Handle::current(), // Pass the handle
+            // No longer passing the handle
             Arc::clone(&config),
             Arc::clone(&session_manager),
             Arc::clone(&policy_engine),
@@ -223,7 +223,7 @@ async fn main() -> Result<()> {
             Arc::clone(&audit_engine),
             Arc::clone(&ollama_manager),
             tui_log_rx.expect("Log receiver should exist in TUI mode"), // Pass receiver
-        )?; // run_tui is not async
+        ).await?; // run_tui is now async
     } else {
         info!("No subcommand provided and running in headless mode. Exiting.");
         // Optionally, print help here using clap if no command is given

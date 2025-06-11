@@ -104,7 +104,7 @@ impl InputBarWidget {
 
         let paragraph = Paragraph::new(text_to_display)
             .block(input_block)
-            .style(Style::default().fg(theme.input_bar_text))
+            .style(Style::default().fg(theme.primary_foreground))
             .scroll((app.input_bar_scroll, 0));
         
         f.render_widget(paragraph, area);

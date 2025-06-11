@@ -31,6 +31,26 @@ pub enum AppView {
     Logs,
 }
 
+impl AppView {
+    pub fn next(&self) -> Self {
+        match self {
+            Self::VmList => Self::OllamaModelList,
+            Self::OllamaModelList => Self::Chat,
+            Self::Chat => Self::Logs,
+            Self::Logs => Self::VmList,
+        }
+    }
+
+    pub fn previous(&self) -> Self {
+        match self {
+            Self::VmList => Self::Logs,
+            Self::OllamaModelList => Self::VmList,
+            Self::Chat => Self::OllamaModelList,
+            Self::Logs => Self::Chat,
+        }
+    }
+}
+
 // Define input modes
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputMode {
@@ -79,7 +99,6 @@ pub enum ChatStreamEvent {
 #[derive(Clone)]
 pub enum AppEvent {
     FetchVms,
-    #[cfg(feature = "ollama_integration")]
     FetchOllamaModels,
     DestroyVm(String),
     ResumeVm(String),
@@ -105,10 +124,7 @@ pub struct App {
     pub ollama_model_list_state: ListState,
 
     pub config: Arc<Config>,
-    pub session_manager: Arc<SessionManager>,
-    pub policy_engine: Arc<PolicyEngine>,
     pub env_manager: Arc<Mutex<EnvironmentManager>>,
-    pub audit_engine: Arc<AuditEngine>,
     pub ollama_manager: Arc<Mutex<OllamaManager>>,
 
     pub active_view: AppView,
@@ -163,10 +179,10 @@ pub struct App {
 impl App {
     pub fn new(
         config: Arc<Config>,
-        session_manager: Arc<SessionManager>,
-        policy_engine: Arc<PolicyEngine>,
+        _session_manager: Arc<SessionManager>,
+        _policy_engine: Arc<PolicyEngine>,
         env_manager: Arc<Mutex<EnvironmentManager>>,
-        audit_engine: Arc<AuditEngine>,
+        _audit_engine: Arc<AuditEngine>,
         ollama_manager: Arc<Mutex<OllamaManager>>,
         log_receiver: mpsc::UnboundedReceiver<UILogEntry>,
     ) -> Self {
@@ -193,10 +209,7 @@ impl App {
             #[cfg(feature = "ollama_integration")]
             ollama_model_list_state: ListState::default(),
             config: Arc::clone(&config),
-            session_manager,
-            policy_engine,
             env_manager,
-            audit_engine,
             ollama_manager,
             active_view: AppView::VmList,
             input_mode: InputMode::Normal,

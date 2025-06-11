@@ -4,6 +4,8 @@ use anyhow::Result;
 use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 use std::fs;
+use std::sync::{Arc, Mutex};
+use std::io::Write;
 // use chrono::{DateTime, Utc}; // For timestamps
 
 use crate::config::Config;
@@ -81,11 +83,8 @@ pub enum RiskLevel {
 }
 
 pub struct AuditEngine {
-    // Configuration for log paths, formats, retention, etc.
-    // config: AuditEngineConfig, (derived from main Config)
-    // Handle for writing to audit logs (e.g., file, network stream)
-    // writer: Mutex<Option<Box<dyn Write + Send>>>
-    log_path: PathBuf, // Path to the main audit ledger file
+    // log_path: PathBuf, // This field is not read
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
 }
 
 impl AuditEngine {
@@ -111,25 +110,19 @@ impl AuditEngine {
         );
         
         Ok(AuditEngine {
-            log_path: log_file_path,
+            writer: Arc::new(Mutex::new(Box::new(std::fs::File::create(log_file_path)?))),
         })
     }
 
-    pub fn record_event(&self, event: AuditEvent) -> Result<()> {
-        // TODO: Implement event recording logic:
-        // 1. Serialize the event (e.g., to JSONL).
-        // 2. Write to the appropriate log file(s) based on event_type and risk_level.
-        //    - System Logs: `~/.hydravisor/logs/system.log` (plaintext)
-        //    - VM & Container Lifecycle Logs: `~/.hydravisor/logs/instances/{id}/lifecycle.log` (JSONL)
-        //    - tmux Session Recordings: Handled by session_manager, but audit event logged here.
-        //    - MCP Activity Logs: `~/.hydravisor/logs/mcp/mcp_activity.jsonl` (JSONL)
-        //    - Audit Ledger: `~/.hydravisor/logs/audit/audit_ledger.jsonl` (hash-chained JSONL)
-        // 3. Implement integrity strategies (hash-chaining for audit_ledger).
-        // 4. Handle potential I/O errors.
-        println!("Recording audit event: {:?}", event);
-        todo!("Implement actual event recording to different log files/formats based on event type and config.");
-        // Ok(())
-    }
+    // This method is never used
+    // pub fn record_event(&self, event: AuditEvent) -> Result<()> {
+    //     let mut writer = self.writer.lock().unwrap();
+    //     let mut json_string = serde_json::to_string(&event)?;
+    //     json_string.push('\n');
+    //     writer.write_all(json_string.as_bytes())?;
+    //     writer.flush()?;
+    //     Ok(())
+    // }
 
     // TODO: Add methods for log verification, export, etc., if handled by this engine.
     // Or these could be CLI-specific functions that use the AuditEngine for data access.

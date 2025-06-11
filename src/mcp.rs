@@ -1,13 +1,10 @@
 // src/mcp.rs
 // Model Context Protocol implementation
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 // use tokio::net::{UnixListener, UnixStream}; // For Unix domain socket
 // use tokio::sync::mpsc; // For message passing between MCP server and other parts of Hydravisor
 
-use crate::config::{Config, McpConfig as McpModuleConfig}; // Specified McpConfig import
 // use crate::errors::HydraError; // Not used yet
 
 // Core MCP message structure (as per mcp.design.md)
@@ -44,88 +41,13 @@ pub struct McpMeta {
     // Add other meta fields as needed
 }
 
-// Represents an MCP client connection or context
-pub struct McpClient {
-    // pub client_id: String,
-    // pub stream: UnixStream, // Or other transport
-    // TODO: Add state related to the client, e.g. authenticated agent_id, role
-}
+// Since McpServer and McpClient are not used, these structs can be removed.
+// pub struct McpClient { ... }
+// pub struct McpServer { ... }
+// pub struct McpMessageWithOrigin { ... }
 
-pub struct McpServer {
-    config: Arc<McpModuleConfig>, // Store the MCP specific config, wrapped in Arc
-    // listener: UnixListener, // Will be initialized later
-    // active_clients: tokio::sync::Mutex<HashMap<String, Arc<McpClient>>>, // Using tokio Mutex
-    // dispatcher_tx: mpsc::Sender<McpMessageWithOrigin> // To send messages to core Hydravisor logic
-}
-
-// Used to pass messages from MCP server to other parts of the application, 
-// including where the message came from.
-pub struct McpMessageWithOrigin {
-    // pub origin_client_id: String,
-    // pub message: McpMessage,
-}
-
-impl McpServer {
-    pub async fn start(app_config: Arc<Config> /*, core_dispatcher_tx: mpsc::Sender<McpMessageWithOrigin>*/) -> Result<Self> {
-        println!(
-            "MCP Server initialized (minimal). Listening on: {}, Timeout: {}ms, Heartbeat: {}s",
-            app_config.mcp.socket_path,
-            app_config.mcp.timeout_ms,
-            app_config.mcp.heartbeat_interval
-        );
-        Ok(McpServer {
-            config: Arc::new(app_config.mcp.clone()), // Clone McpConfig and wrap in Arc
-            // listener: ... // Placeholder for actual listener setup
-            // active_clients: tokio::sync::Mutex::new(HashMap::new()), // Placeholder
-            // dispatcher_tx: core_dispatcher_tx, // Placeholder
-        })
-    }
-
-    // This would run in a loop in a dedicated tokio task
-    async fn accept_loop(&self) -> Result<()> {
-        // loop {
-        //     let (stream, _addr) = self.listener.accept().await?;
-        //     let client_id = generate_unique_client_id(); // Implement this
-        //     let mcp_client = Arc::new(McpClient { client_id: client_id.clone(), stream });
-        //     self.active_clients.lock().unwrap().insert(client_id.clone(), Arc::clone(&mcp_client));
-        //     
-        //     let dispatcher_tx_clone = self.dispatcher_tx.clone();
-        //     tokio::spawn(async move {
-        //         if let Err(e) = Self::handle_client(mcp_client, dispatcher_tx_clone).await {
-        //             eprintln!("MCP client error ({}): {}", client_id, e);
-        //         }
-        //         // TODO: Cleanup client from active_clients map
-        //     });
-        // }
-        todo!("Implement MCP client accept loop.");
-    }
-
-    // Handles communication with a single connected MCP client
-    async fn handle_client(_client: std::sync::Arc<McpClient>, _dispatcher_tx: tokio::sync::mpsc::Sender<McpMessageWithOrigin>) -> Result<()> {
-        // loop {
-        //     // 1. Read data from client.stream (e.g., length-prefixed JSON messages).
-        //     // 2. Deserialize into McpMessage.
-        //     // 3. Perform initial validation (e.g., presence of `type` field).
-        //     // 4. TODO: Authenticate/authorize client if not already done (e.g., first message must be auth, or use transport security).
-        //     //    - This involves the PolicyEngine.
-        //     //    - Agent fingerprint and role would be established here.
-        //     // 5. Construct McpMessageWithOrigin.
-        //     // 6. Send to core Hydravisor logic via dispatcher_tx.
-        //     //    - The core logic will then route it to SessionManager, EnvManager, etc.
-        //     // 7. await response from core logic (if synchronous, or handle async responses).
-        //     // 8. Serialize response McpMessage and send back to client.stream.
-        //     // 9. Handle heartbeats (mcp/heartbeat).
-        //     // 10. Handle client disconnection gracefully.
-        // }
-        todo!("Implement MCP client handling: read, deserialize, auth, dispatch, respond.");
-    }
-
-    pub async fn send_message_to_client(&self, _client_id: &str, _message: McpMessage) -> Result<()> {
-        // TODO: Find client by client_id and send them the message.
-        // This is used for Hydravisor-initiated messages to agents (e.g., model/log, mcp/authorize).
-        todo!("Implement sending message to a specific MCP client.");
-    }
-}
+// The implementation for McpServer is also unused.
+// impl McpServer { ... }
 
 // TODO: Add tests for MCP message serialization/deserialization.
 // TODO: Add tests for MCP server logic (mocking client connections and core dispatcher).

@@ -2,7 +2,7 @@
 // use chrono::Local; // Removed unused import
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect}, // Removed Alignment
-    style::{Color, Style, Stylize},
+    style::{Style, Stylize},
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
@@ -35,9 +35,9 @@ impl ChatWidget {
 
         let chat_info_display_text = if let Some(chat_session) = &app.active_chat {
             let info_lines = vec![
-                Line::from(vec![Span::styled("Model: ", Style::default().fg(theme.secondary_foreground)), Span::styled(&chat_session.model_name, Style::default().fg(theme.chat_info_text).bold())]),
-                Line::from(vec![Span::styled("Messages: ", Style::default().fg(theme.secondary_foreground)), Span::styled(chat_session.messages.len().to_string(), Style::default().fg(theme.chat_info_text))]),
-                Line::from(vec![Span::styled("Streaming: ", Style::default().fg(theme.secondary_foreground)), Span::styled(if chat_session.is_streaming { "Yes" } else { "No" }, Style::default().fg(theme.chat_info_text))]),
+                Line::from(vec![Span::styled("Model: ", Style::default().fg(theme.secondary_foreground)), Span::styled(&chat_session.model_name, Style::default().fg(theme.tertiary_foreground).bold())]),
+                Line::from(vec![Span::styled("Messages: ", Style::default().fg(theme.secondary_foreground)), Span::styled(chat_session.messages.len().to_string(), Style::default().fg(theme.tertiary_foreground))]),
+                Line::from(vec![Span::styled("Streaming: ", Style::default().fg(theme.secondary_foreground)), Span::styled(if chat_session.is_streaming { "Yes" } else { "No" }, Style::default().fg(theme.tertiary_foreground))]),
             ];
             Text::from(info_lines)
         } else {
@@ -52,7 +52,7 @@ impl ChatWidget {
             "Chat Area".to_string()
         };
         let right_pane_block = Block::default()
-            .title(Line::from(Span::styled(right_pane_title_str, theme.chat_title)))
+            .title(Line::from(Span::styled(right_pane_title_str, Style::default().fg(theme.primary_foreground).bold())))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.border_secondary));
         let messages_area = right_pane_block.inner(chunks[1]);
@@ -63,9 +63,9 @@ impl ChatWidget {
         if let Some(chat_session) = &mut app.active_chat {
             let message_items: Vec<ListItem> = chat_session.messages.iter().enumerate().map(|(idx, msg)| {
                 let sender_style = if msg.sender == "user" {
-                    theme.chat_user_sender.clone()
+                    theme.chat_user_message_name.clone()
                 } else {
-                    theme.chat_model_sender.clone()
+                    theme.chat_model_message_name.clone()
                 };
                 
                 let available_width_for_ts_line = messages_area.width; // Total width available for the line
@@ -85,7 +85,7 @@ impl ChatWidget {
 
                 let mut lines_for_list_item = vec![
                     Line::from(Span::styled(format!("{}: ", msg.sender), sender_style)),
-                    Line::from(Span::styled(formatted_timestamp_str, theme.chat_timestamp.clone())), 
+                    Line::from(Span::styled(formatted_timestamp_str, Style::default().fg(theme.secondary_foreground))),
                 ];
 
                 // Render thought if present
@@ -94,7 +94,7 @@ impl ChatWidget {
                         lines_for_list_item.push(Line::from("")); // Add a blank line before thought
                         let wrapped_thought: Vec<Line> = textwrap::fill(thought_text, content_width)
                             .lines()
-                            .map(|line_str| Line::from(Span::styled(line_str.to_string(), theme.chat_thought_style.clone())))
+                            .map(|line_str| Line::from(Span::styled(line_str.to_string(), Style::default().fg(theme.secondary_foreground).italic())))
                             .collect();
                         lines_for_list_item.extend(wrapped_thought);
                     }
@@ -103,7 +103,7 @@ impl ChatWidget {
                 // Render main content
                 let mut current_content_str = msg.content.clone();
                 if chat_session.is_streaming && idx == chat_session.messages.len() - 1 && msg.sender != "user" {
-                    current_content_str.push_str(Span::styled("...", Style::default().fg(theme.chat_streaming_indicator)).content.as_ref());
+                    current_content_str.push_str(Span::styled("...", Style::default().fg(theme.quaternary_foreground)).content.as_ref());
                 }
 
                 if !current_content_str.is_empty() {
@@ -115,11 +115,7 @@ impl ChatWidget {
                     
                     // ---- START REVERT DIAGNOSTIC FOR TEXT ----
                     let final_text_style = if msg.sender != "user" {
-                        let mut model_text_style = theme.chat_model_content_style.clone();
-                        if !theme.chat_model_content_use_background {
-                            model_text_style = model_text_style.bg(Color::Reset);
-                        }
-                        model_text_style
+                        Style::default().fg(theme.primary_foreground)
                     } else {
                         Style::default().fg(theme.primary_foreground)
                     };
@@ -144,7 +140,7 @@ impl ChatWidget {
             // ---- START REVERT DIAGNOSTIC FOR LIST ----
             let chat_list = List::new(message_items)
                 .style(Style::default()) // Revert list background to default/transparent
-                .highlight_style(theme.highlight_style.clone()) // Restore theme highlight style
+                .highlight_style(Style::default().fg(theme.list_highlight_fg).bg(theme.list_highlight_bg)) // Restore theme highlight style
             // ---- END REVERT DIAGNOSTIC FOR LIST ----
                 .highlight_symbol("> ");
 

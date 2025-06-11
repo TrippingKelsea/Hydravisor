@@ -19,7 +19,7 @@ impl NewVmPopupWidget {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.border_accent))
             .title_alignment(Alignment::Center)
-            .style(Style::default().bg(theme.input_bar_background));
+            .style(Style::default().bg(theme.popup_background));
         
         f.render_widget(Clear, popup_area); // Clear the area before rendering the popup
         f.render_widget(block.clone(), popup_area);
@@ -44,7 +44,7 @@ impl NewVmPopupWidget {
             ].as_ref())
             .split(inner_area);
         
-        let active_input_style = Style::default().fg(theme.highlight_style.fg.unwrap_or(theme.primary_foreground));
+        let active_input_style = Style::default().fg(theme.popup_input_fg_active);
 
         let mut name_input = Paragraph::new(app.new_vm_name.as_str())
             .block(Block::default().borders(Borders::ALL).title("VM Name"));

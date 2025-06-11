@@ -9,6 +9,7 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{io, sync::Arc};
 use tokio::sync::{mpsc, Mutex};
+use tracing;
 
 // New module organization
 pub mod app;
@@ -37,8 +38,7 @@ use crate::{
 /// This function initializes the terminal, creates the `App` state,
 /// and enters the main event loop. It's responsible for restoring
 /// the terminal state when the application exits.
-pub fn run_tui(
-    rt: &tokio::runtime::Handle, // Accept a handle to the existing runtime
+pub async fn run_tui(
     config: Arc<Config>,
     session_manager: Arc<SessionManager>,
     policy_engine: Arc<PolicyEngine>,
@@ -66,7 +66,7 @@ pub fn run_tui(
     );
 
     // run app loop
-    let res = rt.block_on(run_app_loop(&mut terminal, app));
+    let res = run_app_loop(&mut terminal, app).await;
 
     // restore terminal
     disable_raw_mode()?;
@@ -78,7 +78,8 @@ pub fn run_tui(
     terminal.show_cursor()?;
 
     if let Err(err) = res {
-        println!("Error: {:?}", err)
+        // Use tracing::error for consistency, as this will also be captured by the TUI log collector
+        tracing::error!("TUI event loop failed: {:?}", err);
     }
 
     Ok(())

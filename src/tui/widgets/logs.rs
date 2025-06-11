@@ -1,6 +1,6 @@
 use ratatui::{
     layout::Rect,
-    style::Style,
+    style::{Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
@@ -16,7 +16,7 @@ impl LogsWidget {
         let theme = &app.theme;
 
         let title_block = Block::default()
-            .title(Line::from(Span::styled("Logs", theme.log_title)))
+            .title(Line::from(Span::styled("Logs", Style::default().fg(theme.primary_foreground).bold())))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.border_primary));
 
@@ -37,7 +37,7 @@ impl LogsWidget {
 
                 let timestamp_span = Span::styled(
                     format!("{} ", log_entry.timestamp),
-                    theme.log_timestamp.clone(),
+                    Style::default().fg(theme.secondary_foreground),
                 );
                 let level_span = Span::styled(
                     format!("{:<5} ", log_entry.level.as_str()),
@@ -45,7 +45,7 @@ impl LogsWidget {
                 );
                 let target_span = Span::styled(
                     format!("[{}] ", log_entry.target),
-                    theme.log_target.clone(),
+                    Style::default().fg(theme.tertiary_foreground),
                 );
                 let message_span = Span::styled(log_entry.message.clone(), Style::default().fg(theme.primary_foreground));
 
@@ -55,7 +55,7 @@ impl LogsWidget {
 
             let log_list = List::new(log_items)
                 .block(title_block)
-                .highlight_style(theme.highlight_style.clone())
+                .highlight_style(Style::default().fg(theme.list_highlight_fg).bg(theme.list_highlight_bg))
                 .highlight_symbol("> ");
 
             f.render_stateful_widget(log_list, area, &mut app.log_list_state);

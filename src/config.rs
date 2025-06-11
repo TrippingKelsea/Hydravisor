@@ -375,38 +375,6 @@ impl Config {
 
         Ok(loaded_config)
     }
-
-    pub fn save(&self) -> Result<()> {
-        let xdg_dirs = BaseDirectories::with_prefix(APP_NAME)
-            .context("Failed to get XDG base directories")?;
-        
-        // Determine config directory and ensure it exists
-        let config_home = xdg_dirs.get_config_home();
-        if !config_home.exists() {
-            std::fs::create_dir_all(&config_home).with_context(|| 
-                format!("Failed to create config directory at {:?}", config_home)
-            )?;
-            info!("Created config directory at {:?}", config_home);
-        }
-
-        let config_path = config_home.join(DEFAULT_CONFIG_FILENAME);
-        info!("Attempting to save configuration to: {:?}", config_path);
-
-        // Create a clone of self to modify for serialization if needed,
-        // especially to ensure skipped fields in `load` are not attempted to be saved
-        // if they were part of the struct. In our case, policy_file_path and ssh_config_file_path
-        // are already marked with #[serde(skip)] for serialization, so a direct clone is fine.
-        let config_to_save = self.clone();
-
-        let toml_string = toml::to_string_pretty(&config_to_save)
-            .context("Failed to serialize config to TOML string")?;
-        
-        std::fs::write(&config_path, toml_string)
-            .with_context(|| format!("Failed to write config to file: {:?}", config_path))?;
-        
-        info!("Configuration saved successfully to {:?}", config_path);
-        Ok(())
-    }
 }
 
 // TODO: Add tests for config loading, default values, and overrides.

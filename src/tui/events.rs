@@ -32,6 +32,27 @@ pub async fn run_app_loop(
     loop {
         terminal.draw(|f| ui(f, &mut app))?;
 
+        // --- Log Handling ---
+        if let Some(ref mut receiver) = app.log_receiver {
+            while let Ok(log_entry) = receiver.try_recv() {
+                app.log_entries.push(log_entry);
+            }
+        }
+        let max_logs = 1000;
+        if app.log_entries.len() > max_logs {
+            let overflow = app.log_entries.len() - max_logs;
+            app.log_entries.drain(0..overflow);
+        }
+        if app.active_view == crate::tui::app::AppView::Logs {
+            let is_scrolled_to_bottom = match app.log_list_state.selected() {
+                Some(index) => index >= app.log_entries.len().saturating_sub(1),
+                None => true,
+            };
+            if is_scrolled_to_bottom && !app.log_entries.is_empty() {
+                    app.log_list_state.select(Some(app.log_entries.len() - 1));
+            }
+        }
+
         let tick_duration = Duration::from_millis(app.config.interface.refresh_interval_ms);
 
         tokio::select! {
@@ -92,27 +113,6 @@ pub async fn run_app_loop(
 }
 
 pub fn on_tick(app: &mut App) {
-    // --- LOG HANDLING ---
-    if let Some(ref mut receiver) = app.log_receiver {
-        while let Ok(log_entry) = receiver.try_recv() {
-            app.log_entries.push(log_entry);
-        }
-    }
-    let max_logs = 1000;
-    if app.log_entries.len() > max_logs {
-        let overflow = app.log_entries.len() - max_logs;
-        app.log_entries.drain(0..overflow);
-    }
-    if app.active_view == crate::tui::app::AppView::Logs {
-        let is_scrolled_to_bottom = match app.log_list_state.selected() {
-            Some(index) => index >= app.log_entries.len().saturating_sub(1),
-            None => true,
-        };
-        if is_scrolled_to_bottom && !app.log_entries.is_empty() {
-                app.log_list_state.select(Some(app.log_entries.len() - 1));
-        }
-    }
-    
     // --- CHAT STREAM HANDLING ---
     if let Some(ref mut receiver) = app.chat_stream_receiver {
         while let Ok(event) = receiver.try_recv() {
@@ -235,6 +235,16 @@ pub fn on_key(app: &mut App, key_event: KeyEvent) {
 }
 
 fn handle_normal_mode_key(app: &mut App, key_event: KeyEvent) {
+    // Global tab navigation
+    if key_event.code == KeyCode::Tab {
+        app.active_view = app.active_view.next();
+        return;
+    }
+    if key_event.code == KeyCode::BackTab {
+        app.active_view = app.active_view.previous();
+        return;
+    }
+
     match app.active_view {
         crate::tui::app::AppView::VmList => match key_event.code {
             KeyCode::Char('q') => app.should_quit = true,
