@@ -19,9 +19,9 @@ impl StatusBarWidget {
             .bg(theme.status_bar_background);
         
         let outlined_h_style = if app.show_menu {
-            Style::default().fg(theme.quaternary_foreground).bg(theme.primary_background).bold()
+            Style::default().fg(theme.quaternary_foreground).bg(theme.primary_background).bold().underlined()
         } else {
-            status_bar_style
+            status_bar_style.underlined()
         };
 
         let status_bar_layout = Layout::default()
