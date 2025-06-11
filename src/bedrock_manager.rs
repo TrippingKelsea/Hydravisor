@@ -4,8 +4,8 @@
 #![cfg(feature = "bedrock_integration")]
 
 use anyhow::Result;
-use aws_config::meta::region::RegionProviderChain;
-use aws_sdk_bedrock::{Client, Region};
+use aws_config::{meta::region::RegionProviderChain, BehaviorVersion};
+use aws_sdk_bedrock::{config::Region, Client};
 use aws_sdk_bedrock::types::FoundationModelSummary;
 use tracing::{info, error, debug};
 
@@ -18,11 +18,11 @@ impl BedrockManager {
     pub async fn new(aws_region: Option<String>) -> Result<Self> {
         let region_provider = RegionProviderChain::first_try(aws_region.map(Region::new))
             .or_default_provider()
-            .or_else(Region::new("us-east-1"));
+            .or_else("us-east-1");
 
         info!("Attempting to connect to AWS Bedrock in region: {:?}", region_provider.region().await);
 
-        let config = aws_config::from_env().region(region_provider).load().await;
+        let config = aws_config::defaults(BehaviorVersion::latest()).region(region_provider).load().await;
         let client = Client::new(&config);
 
         let mut bedrock_connected = false;
@@ -49,7 +49,7 @@ impl BedrockManager {
             debug!("Listing foundation models from AWS Bedrock.");
             match self.client.list_foundation_models().send().await {
                 Ok(response) => {
-                    let models = response.model_summaries().unwrap_or_default().to_vec();
+                    let models = response.model_summaries().to_vec();
                     debug!("Successfully listed {} Bedrock models.", models.len());
                     Ok(models)
                 }

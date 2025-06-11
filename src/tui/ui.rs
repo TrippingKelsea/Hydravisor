@@ -15,6 +15,8 @@ use super::widgets::{
     status_bar::StatusBarWidget,
     vm_list::VmListWidget,
 };
+#[cfg(feature = "bedrock_integration")]
+use super::widgets::bedrock_model_list::BedrockModelListWidget;
 use super::app::AppView;
 
 pub fn ui(f: &mut Frame, app: &mut App) {
@@ -41,6 +43,10 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         }
         AppView::OllamaModelList => {
             OllamaModelListWidget::render(f, app, main_content_area);
+        }
+        #[cfg(feature = "bedrock_integration")]
+        AppView::BedrockModelList => {
+            BedrockModelListWidget::render(f, app, main_content_area);
         }
         AppView::Chat => {
             ChatWidget::render(f, app, main_content_area);

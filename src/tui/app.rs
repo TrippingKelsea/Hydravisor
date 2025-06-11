@@ -529,8 +529,9 @@ impl App {
     }
 }
 
+// Helper for parsing RAM string like "4GB" or "2048MB"
 pub fn parse_ram_str(ram_str: &str) -> Result<u64> {
-    let mut s = ram_str.trim().to_uppercase();
+    let s = ram_str.trim().to_uppercase();
     if let Some(num_str) = s.strip_suffix("GB") {
         num_str
             .trim()

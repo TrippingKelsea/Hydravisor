@@ -84,14 +84,14 @@ pub struct EnvironmentManager {
 }
 
 impl EnvironmentManager {
-    pub fn new(app_config: &Config) -> Result<Self> {
+    pub fn new(_app_config: &Config) -> Result<Self> {
         #[cfg(feature = "libvirt_integration")]
         let (libvirt_conn, libvirt_connected) = match Connect::open(Some("qemu:///system")) {
             Ok(conn) => (Some(conn), true),
             Err(_e) => (None, false),
         };
         #[cfg(not(feature = "libvirt_integration"))]
-        let (libvirt_conn, libvirt_connected): (Option<Connect>, bool) = (None, false); // Ensure libvirt_conn is defined even if feature is off
+        let (_libvirt_conn, libvirt_connected): (Option<()>, bool) = (None, false);
 
         Ok(EnvironmentManager {
             #[cfg(feature = "libvirt_integration")]
@@ -150,7 +150,7 @@ impl EnvironmentManager {
         self.list_vms()
     }
 
-    pub fn resume_environment(&self, instance_id: &str) -> Result<()> {
+    pub fn resume_environment(&self, _instance_id: &str) -> Result<()> {
         // TODO: Implement resuming for paused VMs/containers.
         todo!("Implement environment resuming.");
         // Ok(())
@@ -183,7 +183,7 @@ impl EnvironmentManager {
                 for name in domain_names {
                     if let Ok(domain) = Domain::lookup_by_name(&conn, &name) {
                         let state_info: DomainInfo = domain.get_info()?;
-                        let hydra_state = self.map_libvirt_state_to_hydra(state_info.state as u32);
+                        let hydra_state = self.map_libvirt_state_to_hydra(state_info.state);
                         let status = EnvironmentStatus {
                             instance_id: domain.get_uuid_string().unwrap_or_else(|_| "N/A-UUID".to_string()),
                             name: name.clone(),
@@ -248,35 +248,43 @@ impl EnvironmentManager {
             },
         ])
     }
-
+    
     #[cfg(feature = "libvirt_integration")]
     fn create_vm(&self, env_config: &EnvironmentConfig) -> Result<EnvironmentStatus> {
-        if let Some(_conn) = &self.libvirt_conn {
+        if let Some(conn) = &self.libvirt_conn {
+            let _disk_size_gb = env_config.disk_gb.unwrap_or(20); // Default to 20GB
+
+            // TODO: Logic to create or locate the qcow2 disk image for the new VM
+            // let disk_path = format!("/var/lib/libvirt/images/{}.qcow2", env_config.instance_id);
+
             let vm_name = env_config.instance_id.clone();
-            let disk_size_gb = env_config.disk_gb.unwrap_or(20); // Default to 20GB
             let disk_path = format!("/var/lib/libvirt/images/{}.qcow2", vm_name);
 
-            // TODO: Implement actual disk creation logic
-            // For now, we assume a disk image can be created at `disk_path`.
-            // In a real implementation, you would use `qemu-img` or a library.
-
-            let _domain_xml = self.create_vm_xml(
+            let xml = self.create_vm_xml(
                 &vm_name,
                 env_config.cpu_cores,
                 env_config.memory_mb,
                 &disk_path,
                 env_config.boot_iso.as_deref(),
             );
-
-            // The 'virt' crate does not seem to support domain creation from XML.
-            // This is a known issue blocking VM creation. Consider switching to the 'libvirt-rs' crate.
-            todo!("Blocked: The 'virt' crate does not provide a method to define a VM from XML.");
-
+            
+            let domain = Domain::create_xml(conn, &xml, 0)?;
+            
+            Ok(EnvironmentStatus {
+                instance_id: domain.get_uuid_string()?,
+                name: domain.get_name()?,
+                env_type: EnvironmentType::Vm,
+                state: EnvironmentState::Provisioning,
+                ..Default::default()
+            })
         } else {
-            Err(anyhow!(
-                "Libvirt connection not available. Cannot create VM."
-            ))
+            Err(anyhow!("Libvirt connection not available"))
         }
+    }
+
+    #[cfg(not(feature = "libvirt_integration"))]
+    fn create_vm(&self, _env_config: &EnvironmentConfig) -> Result<EnvironmentStatus> {
+        Err(anyhow!("Cannot create VM: libvirt_integration feature is disabled."))
     }
 
     #[cfg(feature = "libvirt_integration")]
@@ -288,86 +296,64 @@ impl EnvironmentManager {
         disk_path: &str,
         boot_iso: Option<&str>,
     ) -> String {
-
-        let boot_order_xml = if boot_iso.is_some() {
-            "    <boot dev='cdrom'/>\n    <boot dev='hd'/>"
-        } else {
-            "    <boot dev='hd'/>"
-        };
-
-        let iso_disk_xml = if let Some(iso_path) = boot_iso {
-            format!(r#"
-    <disk type='file' device='cdrom'>
-      <driver name='qemu' type='raw'/>
-      <source file='{}'/>
-      <target dev='sda' bus='sata'/>
-      <readonly/>
-    </disk>"#, iso_path)
-        } else {
-            String::new()
-        };
+        let memory_kb = memory_mb * 1024;
+        let mut iso_disk = "".to_string();
+        if let Some(iso_path) = boot_iso {
+            iso_disk = format!(
+                r#"<disk type='file' device='cdrom'>
+                      <driver name='qemu' type='raw'/>
+                      <target dev='hda' bus='sata'/>
+                      <source file='{}'/>
+                      <readonly/>
+                   </disk>"#,
+                iso_path
+            );
+        }
 
         format!(
-            r#"
-<domain type='kvm'>
-  <name>{}</name>
-  <memory unit='MiB'>{}</memory>
-  <vcpu placement='static'>{}</vcpu>
-  <os>
-    <type arch='x86_64' machine='pc-q35-8.0'>hvm</type>
-{}
-  </os>
-  <features>
-    <acpi/>
-    <apic/>
-    <vmport state='off'/>
-  </features>
-  <cpu mode='host-passthrough' check='none' migratable='on'/>
-  <clock offset='utc'>
-    <timer name='rtc' tickpolicy='catchup'/>
-    <timer name='pit' tickpolicy='delay'/>
-    <timer name='hpet' present='no'/>
-  </clock>
-  <devices>
-    <emulator>/usr/bin/qemu-system-x86_64</emulator>
-    <disk type='file' device='disk'>
-      <driver name='qemu' type='qcow2'/>
-      <source file='{}'/>
-      <target dev='vda' bus='virtio'/>
-    </disk>
-{}
-    <interface type='network'>
-      <source network='default'/>
-      <model type='virtio'/>
-    </interface>
-    <input type='tablet' bus='usb'/>
-    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'>
-      <listen type='address' address='127.0.0.1'/>
-    </graphics>
-    <video>
-      <model type='virtio' heads='1' primary='yes'/>
-    </video>
-  </devices>
-</domain>
-"#,
-            name, memory_mb, vcpu, boot_order_xml, disk_path, iso_disk_xml
+            r#"<domain type='kvm'>
+                  <name>{}</name>
+                  <memory unit='KiB'>{}</memory>
+                  <vcpu>{}</vcpu>
+                  <os>
+                    <type arch='x86_64' machine='q35'>hvm</type>
+                    <boot dev='hd'/>
+                    {}
+                  </os>
+                  <devices>
+                    <disk type='file' device='disk'>
+                      <driver name='qemu' type='qcow2'/>
+                      <source file='{}'/>
+                      <target dev='vda' bus='virtio'/>
+                    </disk>
+                    {}
+                    <interface type='network'>
+                      <source network='default'/>
+                      <model type='virtio'/>
+                    </interface>
+                    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'>
+                      <listen type='address' address='127.0.0.1'/>
+                    </graphics>
+                    <video>
+                        <model type="virtio" heads="1" primary="yes"/>
+                    </video>
+                  </devices>
+                </domain>"#,
+            name, memory_kb, vcpu, if boot_iso.is_some() { "<boot dev='cdrom'/>" } else { "" }, disk_path, iso_disk
         )
     }
-    
-    // TODO: Add other lifecycle methods like stop, start, restart as needed.
 
     #[cfg(feature = "libvirt_integration")]
     fn map_libvirt_state_to_hydra(&self, state_code: u32) -> EnvironmentState {
         match state_code {
             sys::VIR_DOMAIN_NOSTATE => EnvironmentState::Unknown,
             sys::VIR_DOMAIN_RUNNING => EnvironmentState::Running,
-            sys::VIR_DOMAIN_BLOCKED => EnvironmentState::Suspended, // Blocked on resource
+            sys::VIR_DOMAIN_BLOCKED => EnvironmentState::Suspended, // Or a more specific state
             sys::VIR_DOMAIN_PAUSED => EnvironmentState::Suspended,
-            sys::VIR_DOMAIN_SHUTDOWN => EnvironmentState::Terminated, // Being shut down
-            sys::VIR_DOMAIN_SHUTOFF => EnvironmentState::Stopped,   // Is off
+            sys::VIR_DOMAIN_SHUTDOWN => EnvironmentState::Terminated,
+            sys::VIR_DOMAIN_SHUTOFF => EnvironmentState::Stopped,
             sys::VIR_DOMAIN_CRASHED => EnvironmentState::Error("Crashed".to_string()),
-            sys::VIR_DOMAIN_PMSUSPENDED => EnvironmentState::Suspended,
-            other_state => {
+            _ => {
                 EnvironmentState::Unknown
             }
         }

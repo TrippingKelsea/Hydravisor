@@ -52,13 +52,20 @@ impl BedrockModelListWidget {
 
         if let Some(selected_idx) = app.bedrock_model_list_state.selected() {
             if let Some(model) = app.bedrock_models.get(selected_idx) {
-                let mut details_lines = vec![
-                    Line::from(vec![Span::styled("Name: ", theme.ollama_model_list_details_title.clone()), Span::raw(model.model_name().unwrap_or("N/A"))]),
-                    Line::from(vec![Span::styled("ID: ", theme.ollama_model_list_details_title.clone()), Span::raw(model.model_id().unwrap_or("N/A"))]),
-                    Line::from(vec![Span::styled("Provider: ", theme.ollama_model_list_details_title.clone()), Span::raw(model.provider_name().unwrap_or("N/A"))]),
-                    Line::from(vec![Span::styled("Customizations: ", theme.ollama_model_list_details_title.clone()), Span::raw(format!("{:?}", model.customizations_supported()))]),
-                    Line::from(vec![Span::styled("Inference Types: ", theme.ollama_model_list_details_title.clone()), Span::raw(format!("{:?}", model.inference_types_supported()))]),
-                    Line::from(vec![Span::styled("Response Streaming: ", theme.ollama_model_list_details_title.clone()), Span::raw(format!("{}", model.response_streaming_supported().unwrap_or(false)))]),
+                let model_name = model.model_name().unwrap_or("N/A");
+                let model_id = model.model_id();
+                let provider_name = model.provider_name().unwrap_or("N/A");
+                let customizations = format!("{:?}", model.customizations_supported());
+                let inference_types = format!("{:?}", model.inference_types_supported());
+                let streaming = format!("{}", model.response_streaming_supported().unwrap_or(false));
+
+                let details_lines = vec![
+                    Line::from(vec![Span::styled("Name: ", theme.ollama_model_list_details_title.clone()), Span::raw(model_name)]),
+                    Line::from(vec![Span::styled("ID: ", theme.ollama_model_list_details_title.clone()), Span::raw(model_id)]),
+                    Line::from(vec![Span::styled("Provider: ", theme.ollama_model_list_details_title.clone()), Span::raw(provider_name)]),
+                    Line::from(vec![Span::styled("Customizations: ", theme.ollama_model_list_details_title.clone()), Span::raw(customizations)]),
+                    Line::from(vec![Span::styled("Inference Types: ", theme.ollama_model_list_details_title.clone()), Span::raw(inference_types)]),
+                    Line::from(vec![Span::styled("Response Streaming: ", theme.ollama_model_list_details_title.clone()), Span::raw(streaming)]),
                 ];
                 f.render_widget(Paragraph::new(Text::from(details_lines)).wrap(ratatui::widgets::Wrap { trim: false }).style(Style::default().fg(theme.primary_foreground)), right_pane_content_area);
             } else {
