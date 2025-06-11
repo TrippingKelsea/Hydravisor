@@ -101,6 +101,8 @@ pub async fn run_app_loop(
                  if last_tick.elapsed() >= tick_duration {
                     on_tick(&mut app);
                     app.event_sender.send(AppEvent::FetchVms).unwrap(); // Send event to refresh
+                    #[cfg(feature = "ollama_integration")]
+                    app.event_sender.send(AppEvent::FetchOllamaModels).unwrap(); // Send event to refresh
                     last_tick = Instant::now();
                 }
             }

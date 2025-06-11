@@ -21,6 +21,8 @@ use futures::stream::StreamExt;
 pub struct OllamaManager {
     #[cfg(feature = "ollama_integration")]
     client: Option<Ollama>,
+    #[cfg(feature = "ollama_integration")]
+    pub ollama_connected: bool,
     // We need a way to signal that ollama is not available even if the feature is compiled
     // if the client fails to initialize.
     #[cfg(not(feature = "ollama_integration"))]
@@ -32,7 +34,7 @@ impl Default for OllamaManager {
         #[cfg(feature = "ollama_integration")]
         {
             warn!("Creating default (non-functional) OllamaManager due to earlier initialization issue or feature configuration.");
-            OllamaManager { client: None }
+            OllamaManager { client: None, ollama_connected: false }
         }
         #[cfg(not(feature = "ollama_integration"))]
         {
@@ -49,20 +51,28 @@ fn map_stream_item_error(_err: ()) -> String { // Return String instead of Ollam
 }
 
 impl OllamaManager {
-    pub fn new(app_config: &Config) -> Result<Self> {
+    pub async fn new(app_config: &Config) -> Result<Self> {
         #[cfg(feature = "ollama_integration")]
         {
-            // TODO: Allow Ollama URL to be configured in Hydravisor's config.toml
             let ollama_host = app_config.ollama_host.clone().unwrap_or_else(|| "http://localhost".to_string());
             let ollama_port = app_config.ollama_port.unwrap_or(11434);
             
             info!("Attempting to connect to Ollama at {}:{}", ollama_host, ollama_port);
             let client = Ollama::new(ollama_host, ollama_port);
-            // There isn't a direct "ping" or "check connection" method in ollama-rs prior to making a real request.
-            // We'll assume for now that if Ollama::new() doesn't panic, it's okay.
-            // Actual availability will be checked during operations like list_models.
-            info!("OllamaManager initialized for connection. Ollama integration enabled.");
-            Ok(Self { client: Some(client) })
+
+            let mut ollama_connected = false;
+            match client.list_local_models().await {
+                Ok(_) => {
+                    info!("Successfully connected to Ollama.");
+                    ollama_connected = true;
+                }
+                Err(e) => {
+                    error!("Failed to connect to Ollama: {}", e);
+                }
+            }
+
+            info!("OllamaManager initialized. Ollama integration enabled.");
+            Ok(Self { client: Some(client), ollama_connected })
         }
         
         #[cfg(not(feature = "ollama_integration"))]
@@ -70,6 +80,16 @@ impl OllamaManager {
             info!("OllamaManager initialized. Ollama integration NOT enabled.");
             Ok(Self { _private: () })
         }
+    }
+
+    #[cfg(feature = "ollama_integration")]
+    pub fn is_ollama_connected(&self) -> bool {
+        self.ollama_connected
+    }
+
+    #[cfg(not(feature = "ollama_integration"))]
+    pub fn is_ollama_connected(&self) -> bool {
+        false
     }
 
     #[cfg(feature = "ollama_integration")]
@@ -203,7 +223,7 @@ impl OllamaManager {
     pub fn is_functional(&self) -> bool {
         #[cfg(feature = "ollama_integration")]
         {
-            self.client.is_some()
+            self.client.is_some() && self.ollama_connected
         }
         #[cfg(not(feature = "ollama_integration"))]
         {

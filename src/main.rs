@@ -164,7 +164,7 @@ async fn main() -> Result<()> {
     };
     info!("Environment Manager initialized.");
 
-    let ollama_manager_result = OllamaManager::new(&config);
+    let ollama_manager_result = OllamaManager::new(&config).await;
     let ollama_manager = match ollama_manager_result {
         Ok(manager) => {
             info!("Ollama Manager initialized successfully.");

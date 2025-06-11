@@ -170,6 +170,7 @@ pub struct App {
 
     // State for status bar
     pub libvirt_connected: bool,
+    pub ollama_connected: bool,
 
     // Channel for sending async commands from sync event handlers
     pub event_sender: mpsc::UnboundedSender<AppEvent>,
@@ -242,6 +243,7 @@ impl App {
             input_cursor_char_idx: 0, // Initialize cursor position
             last_input_text_area_width: 1, // Default, will be updated by render
             libvirt_connected: false, // Initial state
+            ollama_connected: false, // Initial state
             event_sender: event_tx,
             event_receiver: Some(event_rx),
         };
@@ -264,7 +266,9 @@ impl App {
     // Fetches Ollama models asynchronously and updates the app state.
     #[cfg(feature = "ollama_integration")]
     pub async fn fetch_ollama_models(&mut self) {
-        match self.ollama_manager.lock().await.list_local_models().await {
+        let manager = self.ollama_manager.lock().await;
+        self.ollama_connected = manager.is_ollama_connected();
+        match manager.list_local_models().await {
             Ok(models) => self.ollama_models = models,
             Err(e) => {
                 error!("Failed to fetch Ollama models: {}", e);

@@ -68,6 +68,17 @@ impl StatusBarWidget {
             status_spans_right.push(Span::raw(" | "));
         }
         
+        if cfg!(feature = "ollama_integration") && (app.active_view == AppView::OllamaModelList || app.active_view == AppView::Chat) {
+            let (status_text, status_style) = if app.ollama_connected {
+                ("Connected", Style::default().fg(theme.success_text))
+            } else {
+                ("Disconnected", Style::default().fg(theme.error_text))
+            };
+            status_spans_right.push(Span::styled("Ollama: ", status_bar_style));
+            status_spans_right.push(Span::styled(status_text, status_style));
+            status_spans_right.push(Span::raw(" | "));
+        }
+
         status_spans_right.push(Span::from(Local::now().format("%H:%M:%S").to_string()));
 
         f.render_widget(
