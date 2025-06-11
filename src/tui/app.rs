@@ -13,12 +13,17 @@ use uuid::Uuid;
 #[cfg(feature = "ollama_integration")]
 use ollama_rs::models::LocalModel;
 
+#[cfg(feature = "bedrock_integration")]
+use aws_sdk_bedrock::types::FoundationModelSummary;
+
 use crate::config::Config;
 use crate::session_manager::SessionManager;
 use crate::policy::PolicyEngine;
 use crate::env_manager::{EnvironmentManager, EnvironmentStatus};
 use crate::audit_engine::AuditEngine;
 use crate::ollama_manager::OllamaManager;
+#[cfg(feature = "bedrock_integration")]
+use crate::bedrock_manager::BedrockManager;
 
 use super::theme::AppTheme;
 
@@ -27,6 +32,8 @@ use super::theme::AppTheme;
 pub enum AppView {
     VmList,
     OllamaModelList,
+    #[cfg(feature = "bedrock_integration")]
+    BedrockModelList,
     Chat,
     Logs,
 }
@@ -35,7 +42,12 @@ impl AppView {
     pub fn next(&self) -> Self {
         match self {
             Self::VmList => Self::OllamaModelList,
+            #[cfg(not(feature = "bedrock_integration"))]
             Self::OllamaModelList => Self::Chat,
+            #[cfg(feature = "bedrock_integration")]
+            Self::OllamaModelList => Self::BedrockModelList,
+            #[cfg(feature = "bedrock_integration")]
+            Self::BedrockModelList => Self::Chat,
             Self::Chat => Self::Logs,
             Self::Logs => Self::VmList,
         }
@@ -45,7 +57,12 @@ impl AppView {
         match self {
             Self::VmList => Self::Logs,
             Self::OllamaModelList => Self::VmList,
+            #[cfg(feature = "bedrock_integration")]
+            Self::BedrockModelList => Self::OllamaModelList,
+            #[cfg(not(feature = "bedrock_integration"))]
             Self::Chat => Self::OllamaModelList,
+            #[cfg(feature = "bedrock_integration")]
+            Self::Chat => Self::BedrockModelList,
             Self::Logs => Self::Chat,
         }
     }
@@ -100,6 +117,8 @@ pub enum ChatStreamEvent {
 pub enum AppEvent {
     FetchVms,
     FetchOllamaModels,
+    #[cfg(feature = "bedrock_integration")]
+    FetchBedrockModels,
     DestroyVm(String),
     ResumeVm(String),
 }
@@ -117,15 +136,23 @@ pub struct App {
     #[cfg(not(feature = "ollama_integration"))]
     pub ollama_models: Vec<String>,
 
+    #[cfg(feature = "bedrock_integration")]
+    pub bedrock_models: Vec<FoundationModelSummary>,
+
     pub vms: Vec<EnvironmentStatus>,
     pub vm_list_state: ListState,
     
     #[cfg(feature = "ollama_integration")]
     pub ollama_model_list_state: ListState,
 
+    #[cfg(feature = "bedrock_integration")]
+    pub bedrock_model_list_state: ListState,
+
     pub config: Arc<Config>,
     pub env_manager: Arc<Mutex<EnvironmentManager>>,
     pub ollama_manager: Arc<Mutex<OllamaManager>>,
+    #[cfg(feature = "bedrock_integration")]
+    pub bedrock_manager: Arc<Mutex<BedrockManager>>,
 
     pub active_view: AppView,
     pub input_mode: InputMode,
@@ -171,6 +198,8 @@ pub struct App {
     // State for status bar
     pub libvirt_connected: bool,
     pub ollama_connected: bool,
+    #[cfg(feature = "bedrock_integration")]
+    pub bedrock_connected: bool,
 
     // Channel for sending async commands from sync event handlers
     pub event_sender: mpsc::UnboundedSender<AppEvent>,
@@ -185,6 +214,7 @@ impl App {
         env_manager: Arc<Mutex<EnvironmentManager>>,
         _audit_engine: Arc<AuditEngine>,
         ollama_manager: Arc<Mutex<OllamaManager>>,
+        #[cfg(feature = "bedrock_integration")] bedrock_manager: Arc<Mutex<BedrockManager>>,
         log_receiver: mpsc::UnboundedReceiver<UILogEntry>,
     ) -> Self {
         // Create channel for chat stream events
@@ -205,13 +235,19 @@ impl App {
             show_about_modal: false,
             readme_content: String::new(),
             ollama_models: Vec::new(),
+            #[cfg(feature = "bedrock_integration")]
+            bedrock_models: Vec::new(),
             vms: Vec::new(),
             vm_list_state: ListState::default(),
             #[cfg(feature = "ollama_integration")]
             ollama_model_list_state: ListState::default(),
+            #[cfg(feature = "bedrock_integration")]
+            bedrock_model_list_state: ListState::default(),
             config: Arc::clone(&config),
             env_manager,
             ollama_manager,
+            #[cfg(feature = "bedrock_integration")]
+            bedrock_manager,
             active_view: AppView::VmList,
             input_mode: InputMode::Normal,
             current_input: String::new(),
@@ -244,6 +280,8 @@ impl App {
             last_input_text_area_width: 1, // Default, will be updated by render
             libvirt_connected: false, // Initial state
             ollama_connected: false, // Initial state
+            #[cfg(feature = "bedrock_integration")]
+            bedrock_connected: false, // Initial state
             event_sender: event_tx,
             event_receiver: Some(event_rx),
         };
@@ -263,48 +301,91 @@ impl App {
         app
     }
 
-    // Fetches Ollama models asynchronously and updates the app state.
-    #[cfg(feature = "ollama_integration")]
-    pub async fn fetch_ollama_models(&mut self) {
-        let manager = self.ollama_manager.lock().await;
-        self.ollama_connected = manager.is_ollama_connected();
-        match manager.list_local_models().await {
-            Ok(models) => self.ollama_models = models,
-            Err(e) => {
-                error!("Failed to fetch Ollama models: {}", e);
-            }
-        }
-         if self.ollama_model_list_state.selected().is_none() && !self.ollama_models.is_empty() {
-            self.ollama_model_list_state.select(Some(0));
-        }
+    pub fn tick(&mut self) {
+        // This method can be used for periodic updates, e.g., animations
     }
-    
-    pub async fn fetch_vms(&mut self) {
-        let env_manager = self.env_manager.lock().await;
-        self.libvirt_connected = env_manager.is_libvirt_connected();
-        match env_manager.list_environments() {
-            Ok(vms) => self.vms = vms,
-            Err(e) => {
-                error!("Failed to fetch VMs: {}", e);
-                self.vms.clear(); // Clear VMs on error to reflect the failure state
+
+    #[cfg(feature = "bedrock_integration")]
+    pub async fn fetch_bedrock_models(&mut self) {
+        let bm = self.bedrock_manager.lock().await;
+        self.bedrock_connected = bm.is_bedrock_connected();
+        if self.bedrock_connected {
+            match bm.list_foundation_models().await {
+                Ok(models) => {
+                    self.bedrock_models = models;
+                    if self.bedrock_models.is_empty() {
+                        self.bedrock_model_list_state.select(None);
+                    } else if self.bedrock_model_list_state.selected().is_none() {
+                        self.bedrock_model_list_state.select(Some(0));
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to fetch Bedrock models: {}", e);
+                }
             }
-        }
-        if self.vm_list_state.selected().is_none() && !self.vms.is_empty() {
-            self.vm_list_state.select(Some(0));
         }
     }
 
-    // Helper function to get the system prompt for a model, checking the live-edit map first
+    pub async fn fetch_ollama_models(&mut self) {
+        #[cfg(feature = "ollama_integration")]
+        {
+            let om = self.ollama_manager.lock().await;
+            self.ollama_connected = om.is_ollama_connected();
+            if self.ollama_connected {
+                match om.list_local_models().await {
+                    Ok(models) => {
+                        self.ollama_models = models;
+                        if self.ollama_models.is_empty() {
+                            self.ollama_model_list_state.select(None);
+                        } else if self.ollama_model_list_state.selected().is_none() {
+                            self.ollama_model_list_state.select(Some(0));
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to fetch Ollama models: {}", e);
+                        self.ollama_models.clear(); // Clear models on failure
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn fetch_vms(&mut self) {
+        let em = self.env_manager.lock().await;
+        self.libvirt_connected = em.is_libvirt_connected();
+        if self.libvirt_connected {
+            match em.list_environments() {
+                Ok(vms) => {
+                    self.vms = vms;
+                    if self.vms.is_empty() {
+                        self.vm_list_state.select(None);
+                    } else if self.vm_list_state.selected().is_none() {
+                        self.vm_list_state.select(Some(0));
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to fetch VMs: {}", e);
+                }
+            }
+        }
+    }
+
+    // This gets the system prompt for a model, checking for a model-specific override
+    // in our live-editing map first, then falling back to the main config.
     pub fn get_active_system_prompt(&self, model_name: &str) -> String {
         self.editable_ollama_model_prompts
             .get(model_name)
             .cloned()
-            .unwrap_or_else(|| self.config.default_system_prompt.clone().unwrap_or_default())
+            .unwrap_or_else(|| {
+                self.config
+                    .get_system_prompt_for_model(model_name)
+                    .unwrap_or_else(|| self.config.default_system_prompt.clone().unwrap_or_default())
+            })
     }
 
     pub fn menu_next(&mut self) {
         let i = match self.menu_state.selected() {
-            Some(i) => if i >= 1 { 0 } else { i + 1 },
+            Some(i) => (i + 1) % 3, // 3 items in menu
             None => 0,
         };
         self.menu_state.select(Some(i));
@@ -312,53 +393,69 @@ impl App {
 
     pub fn menu_previous(&mut self) {
         let i = match self.menu_state.selected() {
-            Some(i) => if i == 0 { 1 } else { i - 1 },
+            Some(i) => (i + 3 - 1) % 3,
             None => 0,
         };
         self.menu_state.select(Some(i));
     }
-    
+
     pub fn select_next_item_in_vm_list(&mut self) {
-            if self.vms.is_empty() { return; }
-            let i = match self.vm_list_state.selected() {
-                Some(i) => if i >= self.vms.len() - 1 { 0 } else { i + 1 },
-                None => 0,
-            };
-            self.vm_list_state.select(Some(i));
+        let i = match self.vm_list_state.selected() {
+            Some(i) => {
+                if i >= self.vms.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.vm_list_state.select(Some(i));
     }
 
     pub fn select_previous_item_in_vm_list(&mut self) {
-            if self.vms.is_empty() { return; }
-            let i = match self.vm_list_state.selected() {
-                Some(i) => if i == 0 { self.vms.len() - 1 } else { i - 1 },
-                None => 0,
-            };
-            self.vm_list_state.select(Some(i));
+        let i = match self.vm_list_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.vms.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.vm_list_state.select(Some(i));
     }
 
     #[cfg(feature = "ollama_integration")]
     pub fn select_next_item_in_ollama_list(&mut self) {
-            let i = match self.ollama_model_list_state.selected() {
-                Some(i) => if i >= self.ollama_models.len() - 1 { 0 } else { i + 1 },
-                None => 0,
-            };
-            self.ollama_model_list_state.select(Some(i));
+        let i = match self.ollama_model_list_state.selected() {
+            Some(i) => {
+                if i >= self.ollama_models.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.ollama_model_list_state.select(Some(i));
     }
 
     #[cfg(feature = "ollama_integration")]
     pub fn select_previous_item_in_ollama_list(&mut self) {
-            let i = match self.ollama_model_list_state.selected() {
-                Some(i) => if i == 0 { self.ollama_models.len() - 1 } else { i - 1 },
-                None => 0,
-            };
-            self.ollama_model_list_state.select(Some(i));
-        }
-
-    #[cfg(not(feature = "ollama_integration"))]
-    pub fn select_next_item_in_ollama_list(&mut self) { }
-
-    #[cfg(not(feature = "ollama_integration"))]
-    pub fn select_previous_item_in_ollama_list(&mut self) { }
+        let i = match self.ollama_model_list_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.ollama_models.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.ollama_model_list_state.select(Some(i));
+    }
 
     pub fn scroll_chat_up(&mut self) {
         if let Some(_) = &self.active_chat {
@@ -401,21 +498,51 @@ impl App {
         self.input_bar_cursor_needs_to_be_visible = true;
     }
 
+    #[cfg(feature = "bedrock_integration")]
+    pub fn select_next_item_in_bedrock_list(&mut self) {
+        let i = match self.bedrock_model_list_state.selected() {
+            Some(i) => {
+                if i >= self.bedrock_models.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.bedrock_model_list_state.select(Some(i));
+    }
+
+    #[cfg(feature = "bedrock_integration")]
+    pub fn select_previous_item_in_bedrock_list(&mut self) {
+        let i = match self.bedrock_model_list_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.bedrock_models.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.bedrock_model_list_state.select(Some(i));
+    }
 }
 
-
-// Helper for parsing RAM string like "4GB" or "2048MB"
 pub fn parse_ram_str(ram_str: &str) -> Result<u64> {
-    let s = ram_str.trim().to_lowercase();
-    if let Some(num_str) = s.strip_suffix("gb") {
+    let mut s = ram_str.trim().to_uppercase();
+    if let Some(num_str) = s.strip_suffix("GB") {
         num_str
             .trim()
             .parse::<u64>()
             .map(|num| num * 1024)
             .map_err(anyhow::Error::from)
-    } else if let Some(num_str) = s.strip_suffix("mb") {
+    } else if let Some(num_str) = s.strip_suffix("MB") {
         num_str.trim().parse::<u64>().map_err(anyhow::Error::from)
     } else {
-        ram_str.trim().parse::<u64>().map_err(anyhow::Error::from)
+        ram_str
+            .trim()
+            .parse::<u64>()
+            .map_err(anyhow::Error::from)
     }
 } 

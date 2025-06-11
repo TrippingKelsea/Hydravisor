@@ -32,6 +32,10 @@ unicode-width = "0.1.11" # Added for text wrapping in TUI
 textwrap = "0.16" # Added for better text wrapping
 strip-ansi-escapes = "0.2.0" # For sanitizing model output
 
+aws-config = { version = "1.1.7", optional = true }
+aws-sdk-bedrock = { version = "1.15.0", optional = true }
+aws-sdk-bedrockruntime = { version = "1.15.0", optional = true }
+
 # Placeholder for potential future dependencies from design docs
 # libvirt-rs = { version = "0.7", optional = true } # For KVM
 # containerd-client = { version = "0.8", optional = true } # For containerd
@@ -44,3 +48,4 @@ default = ["libvirt_integration", "ollama_integration"] # Make libvirt_integrati
 libvirt_integration = ["dep:virt"] # Feature to enable libvirt integration
 dummy_env_data = [] # New feature for enabling dummy VM data
 ollama_integration = ["dep:ollama-rs"] # Feature to enable Ollama integration
+bedrock_integration = ["dep:aws-config", "dep:aws-sdk-bedrock", "dep:aws-sdk-bedrockruntime"] # Feature to enable Bedrock integration

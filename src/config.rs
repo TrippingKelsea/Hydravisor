@@ -375,6 +375,14 @@ impl Config {
 
         Ok(loaded_config)
     }
+
+    pub fn get_system_prompt_for_model(&self, model_name: &str) -> Option<String> {
+        self.providers
+            .ollama
+            .model_system_prompts
+            .as_ref()
+            .and_then(|prompts| prompts.get(model_name).cloned())
+    }
 }
 
 // TODO: Add tests for config loading, default values, and overrides.

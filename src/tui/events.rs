@@ -28,6 +28,8 @@ pub async fn run_app_loop(
     app.fetch_vms().await;
     #[cfg(feature = "ollama_integration")]
     app.fetch_ollama_models().await;
+    #[cfg(feature = "bedrock_integration")]
+    app.fetch_bedrock_models().await;
 
     loop {
         terminal.draw(|f| ui(f, &mut app))?;
@@ -66,6 +68,10 @@ pub async fn run_app_loop(
                     AppEvent::FetchOllamaModels => {
                         app.fetch_ollama_models().await;
                     }
+                    #[cfg(feature = "bedrock_integration")]
+                    AppEvent::FetchBedrockModels => {
+                        app.fetch_bedrock_models().await;
+                    }
                     AppEvent::DestroyVm(vm_name) => {
                         let env_manager = Arc::clone(&app.env_manager);
                         tokio::spawn(async move {
@@ -103,6 +109,8 @@ pub async fn run_app_loop(
                     app.event_sender.send(AppEvent::FetchVms).unwrap(); // Send event to refresh
                     #[cfg(feature = "ollama_integration")]
                     app.event_sender.send(AppEvent::FetchOllamaModels).unwrap(); // Send event to refresh
+                    #[cfg(feature = "bedrock_integration")]
+                    app.event_sender.send(AppEvent::FetchBedrockModels).unwrap();
                     last_tick = Instant::now();
                 }
             }
@@ -171,6 +179,8 @@ pub fn on_mouse_event(app: &mut App, mouse_event: MouseEvent) {
             match app.active_view {
                 crate::tui::app::AppView::VmList => app.select_previous_item_in_vm_list(),
                 crate::tui::app::AppView::OllamaModelList => app.select_previous_item_in_ollama_list(),
+                #[cfg(feature = "bedrock_integration")]
+                crate::tui::app::AppView::BedrockModelList => app.select_previous_item_in_bedrock_list(),
                 crate::tui::app::AppView::Chat => app.scroll_chat_up(),
                 crate::tui::app::AppView::Logs => app.scroll_logs_up(),
             }
@@ -179,6 +189,8 @@ pub fn on_mouse_event(app: &mut App, mouse_event: MouseEvent) {
             match app.active_view {
                 crate::tui::app::AppView::VmList => app.select_next_item_in_vm_list(),
                 crate::tui::app::AppView::OllamaModelList => app.select_next_item_in_ollama_list(),
+                #[cfg(feature = "bedrock_integration")]
+                crate::tui::app::AppView::BedrockModelList => app.select_next_item_in_bedrock_list(),
                 crate::tui::app::AppView::Chat => app.scroll_chat_down(),
                 crate::tui::app::AppView::Logs => app.scroll_logs_down(),
             }
@@ -305,6 +317,13 @@ fn handle_normal_mode_key(app: &mut App, key_event: KeyEvent) {
                     }
                 }
             },
+            _ => {}
+        },
+        #[cfg(feature = "bedrock_integration")]
+        crate::tui::app::AppView::BedrockModelList => match key_event.code {
+            KeyCode::Char('q') => app.should_quit = true,
+            KeyCode::Down | KeyCode::Char('j') => app.select_next_item_in_bedrock_list(),
+            KeyCode::Up | KeyCode::Char('k') => app.select_previous_item_in_bedrock_list(),
             _ => {}
         },
         crate::tui::app::AppView::Chat => match key_event.code {

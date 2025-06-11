@@ -13,6 +13,8 @@ mod policy;
 mod session_manager;
 mod ssh_manager;
 mod ollama_manager;
+#[cfg(feature = "bedrock_integration")]
+mod bedrock_manager;
 
 use anyhow::Result;
 use clap::Parser;
@@ -28,6 +30,8 @@ use audit_engine::AuditEngine;
 use env_manager::EnvironmentManager;
 use session_manager::SessionManager;
 use ollama_manager::OllamaManager;
+#[cfg(feature = "bedrock_integration")]
+use bedrock_manager::BedrockManager;
 
 use tracing::{error, info, warn, debug}; // Removed Level as it's implicitly handled by EnvFilter/macros
 use tracing_subscriber::{
@@ -185,6 +189,27 @@ async fn main() -> Result<()> {
         }
     };
 
+    #[cfg(feature = "bedrock_integration")]
+    let bedrock_manager = {
+        let aws_region = config.providers.bedrock.region.clone();
+        match BedrockManager::new(Some(aws_region)).await {
+            Ok(manager) => {
+                info!("Bedrock Manager initialized.");
+                Arc::new(Mutex::new(manager))
+            },
+            Err(e) => {
+                error!("Bedrock Manager initialization failed: {}", e);
+                // Non-fatal: the app can run without Bedrock
+                // Create a non-functional default or placeholder if necessary
+                // For now, we'll proceed, and the TUI will show a disconnected state.
+                // A more robust solution might involve a dummy manager.
+                // For simplicity, we'll let the app proceed.
+                // In a real-world scenario, you might want to handle this more gracefully.
+                Arc::new(Mutex::new(BedrockManager::new(None).await?)) // Simplified for now
+            }
+        }
+    };
+
     let session_manager = match SessionManager::new(Arc::clone(&config), Arc::clone(&env_manager), Arc::clone(&policy_engine), Arc::clone(&ssh_manager), Arc::clone(&audit_engine)) {
         Ok(manager) => Arc::new(manager),
         Err(e) => {
@@ -222,6 +247,8 @@ async fn main() -> Result<()> {
             Arc::clone(&env_manager),
             Arc::clone(&audit_engine),
             Arc::clone(&ollama_manager),
+            #[cfg(feature = "bedrock_integration")]
+            Arc::clone(&bedrock_manager),
             tui_log_rx.expect("Log receiver should exist in TUI mode"), // Pass receiver
         ).await?; // run_tui is now async
     } else {
