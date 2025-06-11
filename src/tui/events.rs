@@ -415,6 +415,11 @@ fn handle_editing_mode_key(app: &mut App, key_event: KeyEvent) {
                 app.input_mode = InputMode::Normal;
             }
         },
+        KeyCode::Up | KeyCode::Down => {
+            // Intercept up and down keys to prevent panic.
+            // This is a temporary fix. A full implementation would handle
+            // command history or multiline input navigation.
+        }
         _ => handle_input_bar_key(app, key_event),
     }
 }
@@ -475,8 +480,6 @@ fn handle_input_bar_key(app: &mut App, key_event: KeyEvent) {
             app.input_cursor_char_idx = app.current_input.chars().count();
             app.input_bar_cursor_needs_to_be_visible = true;
         },
-        KeyCode::Up => {},
-        KeyCode::Down => {},
         _ => {}
     }
 }

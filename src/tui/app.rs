@@ -315,6 +315,7 @@ impl App {
     }
     
     pub fn select_next_item_in_vm_list(&mut self) {
+            if self.vms.is_empty() { return; }
             let i = match self.vm_list_state.selected() {
                 Some(i) => if i >= self.vms.len() - 1 { 0 } else { i + 1 },
                 None => 0,
@@ -323,6 +324,7 @@ impl App {
     }
 
     pub fn select_previous_item_in_vm_list(&mut self) {
+            if self.vms.is_empty() { return; }
             let i = match self.vm_list_state.selected() {
                 Some(i) => if i == 0 { self.vms.len() - 1 } else { i - 1 },
                 None => 0,
