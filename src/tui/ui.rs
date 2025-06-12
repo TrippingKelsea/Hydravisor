@@ -65,6 +65,10 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     if app.show_about_modal {
         AboutModalWidget::render(f, app, f.size());
     }
+    if app.show_keybindings_modal {
+        use super::widgets::keybindings_modal::KeybindingsModalWidget;
+        KeybindingsModalWidget::render(f, app, f.size());
+    }
 
     // Render menu over everything if active
     if app.show_menu {

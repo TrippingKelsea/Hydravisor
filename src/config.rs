@@ -27,6 +27,8 @@ pub struct Config {
     pub tmux: TmuxConfig,
     #[serde(default)]
     pub mcp: McpConfig,
+    #[serde(default)]
+    pub keybindings: KeyBindingsConfig,
     // Paths to other config files, not part of config.toml itself
     // but resolved during Config::load
     #[serde(skip)]
@@ -305,6 +307,52 @@ impl Default for McpConfig {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct KeyBindingsConfig {
+    #[serde(default = "default_quit")] pub quit: String,
+    #[serde(default = "default_help")] pub help: String,
+    #[serde(default = "default_menu")] pub menu: String,
+    #[serde(default = "default_next_tab")] pub next_tab: String,
+    #[serde(default = "default_prev_tab")] pub prev_tab: String,
+    #[serde(default = "default_new_vm")] pub new_vm: String,
+    #[serde(default = "default_destroy_vm")] pub destroy_vm: String,
+    #[serde(default = "default_edit")] pub edit: String,
+    #[serde(default = "default_enter")] pub enter: String,
+    #[serde(default = "default_up")] pub up: String,
+    #[serde(default = "default_down")] pub down: String,
+}
+
+fn default_quit() -> String { "q".to_string() }
+fn default_help() -> String { "?".to_string() }
+fn default_menu() -> String { "Ctrl+h".to_string() }
+fn default_next_tab() -> String { "Tab".to_string() }
+fn default_prev_tab() -> String { "BackTab".to_string() }
+fn default_new_vm() -> String { "n".to_string() }
+fn default_destroy_vm() -> String { "d".to_string() }
+fn default_edit() -> String { "e".to_string() }
+fn default_enter() -> String { "Enter".to_string() }
+fn default_up() -> String { "Up".to_string() }
+fn default_down() -> String { "Down".to_string() }
+
+impl Default for KeyBindingsConfig {
+    fn default() -> Self {
+        Self {
+            quit: default_quit(),
+            help: default_help(),
+            menu: default_menu(),
+            next_tab: default_next_tab(),
+            prev_tab: default_prev_tab(),
+            new_vm: default_new_vm(),
+            destroy_vm: default_destroy_vm(),
+            edit: default_edit(),
+            enter: default_enter(),
+            up: default_up(),
+            down: default_down(),
+        }
+    }
+}
+
 fn default_global_system_prompt() -> Option<String> {
     Some("You are a helpful AI assistant.".to_string())
 }
@@ -318,10 +366,11 @@ impl Default for Config {
             logging: LoggingConfig::default(),
             tmux: TmuxConfig::default(),
             mcp: McpConfig::default(),
+            keybindings: KeyBindingsConfig::default(),
             policy_file_path: None,
             ssh_config_file_path: None,
-            ollama_host: Some("http://localhost".to_string()),
-            ollama_port: Some(11434),
+            ollama_host: None,
+            ollama_port: None,
             default_system_prompt: default_global_system_prompt(),
         }
     }

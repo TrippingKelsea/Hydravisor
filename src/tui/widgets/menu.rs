@@ -16,15 +16,26 @@ impl MenuWidget {
         }
 
         let theme = &app.theme;
-        let items = [
+        // Menu structure: Main -> Preferences -> Keybindings
+        let main_items = [
             ListItem::new(Line::from(vec![Span::raw("About")])),
+            ListItem::new(Line::from(vec![Span::raw("Preferences")])),
             ListItem::new(Line::from(vec![Span::raw("Quit")])),
         ];
+        let prefs_items = [
+            ListItem::new(Line::from(vec![Span::raw("Keybindings")])),
+        ];
+
+        let (items, title, menu_height) = match app.menu_level {
+            0 => (&main_items[..], "Menu", 6),
+            1 => (&prefs_items[..], "Preferences", 4),
+            _ => (&main_items[..], "Menu", 6),
+        };
 
         let list = List::new(items)
             .block(
                 Block::default()
-                    .title("Menu")
+                    .title(title)
                     .borders(Borders::ALL)
                     .style(Style::default().fg(theme.primary_foreground).bg(theme.primary_background))
             )
@@ -35,11 +46,15 @@ impl MenuWidget {
         let menu_area = Rect {
             x: area.x + 5,
             y: area.y + 1,
-            width: 20,
-            height: 4,
+            width: 24,
+            height: menu_height,
         };
 
         f.render_widget(Clear, menu_area); //this clears the background
-        f.render_stateful_widget(list, menu_area, &mut app.menu_state);
+        if app.menu_level == 0 {
+            f.render_stateful_widget(list, menu_area, &mut app.menu_state);
+        } else if app.menu_level == 1 {
+            f.render_stateful_widget(list, menu_area, &mut app.menu_sub_state);
+        }
     }
 } 

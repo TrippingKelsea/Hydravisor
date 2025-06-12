@@ -208,6 +208,11 @@ pub struct App {
 
     #[cfg(feature = "bedrock_integration")]
     pub bedrock_model_view_mode: ListViewMode<FoundationModelSummary>,
+
+    pub show_keybindings_modal: bool,
+
+    pub menu_level: u8, // 0 = main, 1 = preferences
+    pub menu_sub_state: ListState,
 }
 
 impl App {
@@ -290,6 +295,9 @@ impl App {
             event_receiver: Some(event_rx),
             #[cfg(feature = "bedrock_integration")]
             bedrock_model_view_mode: ListViewMode::new(),
+            show_keybindings_modal: false,
+            menu_level: 0,
+            menu_sub_state: ListState::default(),
         };
         
         // Read README.md for the about modal

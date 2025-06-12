@@ -200,6 +200,12 @@ pub fn on_mouse_event(app: &mut App, mouse_event: MouseEvent) {
 }
 
 pub fn on_key(app: &mut App, key_event: KeyEvent) {
+    if app.show_keybindings_modal {
+        if key_event.code == KeyCode::Esc {
+            app.show_keybindings_modal = false;
+        }
+        return;
+    }
     if app.show_about_modal {
         match key_event.code {
             KeyCode::Esc | KeyCode::Char('q') => {
@@ -209,37 +215,77 @@ pub fn on_key(app: &mut App, key_event: KeyEvent) {
         }
         return;
     }
-
     if app.show_menu {
-        match key_event.code {
-            KeyCode::Char('h') | KeyCode::Esc => app.show_menu = false,
-            KeyCode::Down | KeyCode::Char('j') => app.menu_next(),
-            KeyCode::Up | KeyCode::Char('k') => app.menu_previous(),
-            KeyCode::Enter => {
-                if let Some(selected) = app.menu_state.selected() {
-                    match selected {
-                        0 => { // About
-                            app.show_about_modal = true;
-                            app.show_menu = false;
-                        },
-                        1 => app.should_quit = true, // Quit
-                        _ => {}
+        match app.menu_level {
+            0 => {
+                match key_event.code {
+                    KeyCode::Char('h') | KeyCode::Esc => app.show_menu = false,
+                    KeyCode::Down | KeyCode::Char('j') => app.menu_next(),
+                    KeyCode::Up | KeyCode::Char('k') => app.menu_previous(),
+                    KeyCode::Enter => {
+                        if let Some(selected) = app.menu_state.selected() {
+                            match selected {
+                                0 => { // About
+                                    app.show_about_modal = true;
+                                    app.show_menu = false;
+                                },
+                                1 => { // Preferences
+                                    app.menu_level = 1;
+                                    app.menu_sub_state.select(Some(0));
+                                },
+                                2 => app.should_quit = true, // Quit
+                                _ => {}
+                            }
+                        }
                     }
+                    _ => {}
+                }
+            }
+            1 => {
+                match key_event.code {
+                    KeyCode::Esc => {
+                        app.menu_level = 0;
+                        app.menu_sub_state.select(None);
+                    },
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        let idx = app.menu_sub_state.selected().unwrap_or(0);
+                        let next = (idx + 1) % 1; // Only one item for now
+                        app.menu_sub_state.select(Some(next));
+                    },
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        let idx = app.menu_sub_state.selected().unwrap_or(0);
+                        let prev = if idx == 0 { 0 } else { idx - 1 };
+                        app.menu_sub_state.select(Some(prev));
+                    },
+                    KeyCode::Enter => {
+                        if let Some(selected) = app.menu_sub_state.selected() {
+                            match selected {
+                                0 => { // Keybindings
+                                    app.show_keybindings_modal = true;
+                                    app.show_menu = false;
+                                    app.menu_level = 0;
+                                    app.menu_sub_state.select(None);
+                                },
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
             _ => {}
         }
         return;
     }
-
     if let KeyCode::Char('h') = key_event.code {
         if key_event.modifiers == KeyModifiers::CONTROL {
             app.show_menu = !app.show_menu;
             app.menu_state.select(Some(0));
-        return;
+            app.menu_level = 0;
+            app.menu_sub_state.select(None);
+            return;
+        }
     }
-    }
-
     match app.input_mode {
         InputMode::Normal => handle_normal_mode_key(app, key_event),
         InputMode::Editing => handle_editing_mode_key(app, key_event),

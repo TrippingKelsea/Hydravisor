@@ -7,6 +7,7 @@ pub mod new_vm_popup;
 pub mod ollama_model_list;
 pub mod status_bar;
 pub mod vm_list;
+pub mod keybindings_modal;
 
 #[cfg(feature = "bedrock_integration")]
 pub mod bedrock_model_list;
