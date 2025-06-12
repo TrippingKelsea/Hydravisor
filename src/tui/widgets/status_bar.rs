@@ -39,12 +39,21 @@ impl StatusBarWidget {
             InputMode::ConfirmingDestroy => theme.status_bar_mode_confirm_destroy_bg,
         };
 
+        let view_name_fg = match app.active_view {
+            AppView::VmList => theme.status_bar_view_vm_list_fg,
+            AppView::OllamaModelList => theme.status_bar_view_ollama_model_list_fg,
+            #[cfg(feature = "bedrock_integration")]
+            AppView::BedrockModelList => theme.status_bar_view_bedrock_model_list_fg,
+            AppView::Chat => theme.status_bar_view_chat_fg,
+            AppView::Logs => theme.status_bar_view_logs_fg,
+        };
+
         let status_spans_left = Line::from(vec![
             Span::styled("H", outlined_h_style),
             Span::styled("ydravisor | ", status_bar_style),
             Span::styled("View: ", status_bar_style),
             Span::styled(format!("{:?}", app.active_view), 
-                         Style::default().fg(theme.status_bar_view_name_fg).bg(theme.status_bar_background).bold()),
+                         Style::default().fg(view_name_fg).bg(theme.status_bar_background).bold()),
             Span::styled(" | Input: ", status_bar_style),
             Span::styled(format!("{:?}", app.input_mode), 
                          Style::default().fg(theme.primary_foreground).bg(view_mode_bg).bold()),

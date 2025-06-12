@@ -26,6 +26,7 @@ use crate::ollama_manager::OllamaManager;
 use crate::bedrock_manager::BedrockManager;
 
 use super::theme::AppTheme;
+use crate::tui::view_mode::list::ListViewMode;
 
 // Define different views for the TUI
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,6 +205,9 @@ pub struct App {
     // Channel for sending async commands from sync event handlers
     pub event_sender: mpsc::UnboundedSender<AppEvent>,
     pub event_receiver: Option<mpsc::UnboundedReceiver<AppEvent>>,
+
+    #[cfg(feature = "bedrock_integration")]
+    pub bedrock_model_view_mode: ListViewMode<FoundationModelSummary>,
 }
 
 impl App {
@@ -284,6 +288,8 @@ impl App {
             bedrock_connected: false, // Initial state
             event_sender: event_tx,
             event_receiver: Some(event_rx),
+            #[cfg(feature = "bedrock_integration")]
+            bedrock_model_view_mode: ListViewMode::new(),
         };
         
         // Read README.md for the about modal

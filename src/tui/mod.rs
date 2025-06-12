@@ -1,5 +1,3 @@
-// src/tui.rs
-
 use anyhow::Result;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
@@ -18,6 +16,7 @@ pub mod theme;
 pub mod tracing_layer;
 pub mod ui;
 pub mod widgets;
+pub mod view_mode;
 
 // Re-export necessary components
 pub use app::{App, UILogEntry};

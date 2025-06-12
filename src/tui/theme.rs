@@ -27,6 +27,15 @@ pub struct AppTheme {
     pub status_bar_mode_editing_bg: Color,
     pub status_bar_mode_vm_wizard_bg: Color,
     pub status_bar_mode_confirm_destroy_bg: Color,
+    pub status_bar_mode_normal_fg: Color,
+    pub status_bar_mode_editing_fg: Color,
+    pub status_bar_mode_vm_wizard_fg: Color,
+    pub status_bar_mode_confirm_destroy_fg: Color,
+    pub status_bar_view_vm_list_fg: Color,
+    pub status_bar_view_ollama_model_list_fg: Color,
+    pub status_bar_view_bedrock_model_list_fg: Color,
+    pub status_bar_view_chat_fg: Color,
+    pub status_bar_view_logs_fg: Color,
 
     pub input_bar_title: Style,
 
@@ -95,6 +104,15 @@ impl Default for AppTheme {
             status_bar_mode_editing_bg: Color::Rgb(200, 50, 50), // Red
             status_bar_mode_vm_wizard_bg: Color::Rgb(100, 60, 200), // Purple
             status_bar_mode_confirm_destroy_bg: Color::Rgb(255, 100, 0), // Orange
+            status_bar_mode_normal_fg: Color::White,
+            status_bar_mode_editing_fg: Color::Rgb(255, 255, 0), // Bright yellow
+            status_bar_mode_vm_wizard_fg: Color::Rgb(0, 255, 255), // Bright cyan
+            status_bar_mode_confirm_destroy_fg: Color::Rgb(255, 0, 0), // Bright red
+            status_bar_view_vm_list_fg: Color::Rgb(0, 220, 0), // Bright green
+            status_bar_view_ollama_model_list_fg: Color::Rgb(0, 180, 255), // Bright blue
+            status_bar_view_bedrock_model_list_fg: Color::Rgb(200, 80, 200), // Bright magenta
+            status_bar_view_chat_fg: Color::Rgb(255, 220, 0), // Bright yellow
+            status_bar_view_logs_fg: Color::Rgb(255, 140, 0), // Bright orange
 
             input_bar_title: Style::default().fg(Color::Rgb(0, 150, 255)),
 

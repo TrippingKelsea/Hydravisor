@@ -8,6 +8,7 @@ use ratatui::{
     Frame,
 };
 use crate::tui::App;
+use crate::tui::view_mode::list::ListViewMode;
 
 pub struct BedrockModelListWidget;
 
@@ -30,7 +31,9 @@ impl BedrockModelListWidget {
         let left_pane_content_area = left_pane_block.inner(chunks[0]);
         f.render_widget(left_pane_block, chunks[0]);
 
-        let model_items: Vec<ListItem> = app.bedrock_models.iter()
+        let filtered_models = app.bedrock_model_view_mode.apply(&app.bedrock_models);
+        let model_items: Vec<ListItem> = filtered_models
+            .iter()
             .map(|model| {
                 let model_name = model.model_name().unwrap_or("Unknown Model");
                 ListItem::new(Line::from(Span::styled(model_name.to_string(), Style::default().fg(theme.primary_foreground))))
@@ -51,7 +54,7 @@ impl BedrockModelListWidget {
         f.render_widget(right_pane_block.clone(), chunks[1]);
 
         if let Some(selected_idx) = app.bedrock_model_list_state.selected() {
-            if let Some(model) = app.bedrock_models.get(selected_idx) {
+            if let Some(model) = filtered_models.get(selected_idx) {
                 let model_name = model.model_name().unwrap_or("N/A");
                 let model_id = model.model_id();
                 let provider_name = model.provider_name().unwrap_or("N/A");
