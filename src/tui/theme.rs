@@ -107,8 +107,11 @@ impl Default for AppTheme {
             ollama_model_list_name: Style::default().fg(Color::White),
             ollama_model_list_details_title: Style::default().fg(Color::Rgb(120, 120, 120)),
 
-            chat_user_message_name: Style::default().fg(Color::Rgb(0, 180, 220)).bold(),
+            // chat_user_message_name: Style::default().fg(Color::Rgb(0, 180, 220)).bold(),
+            chat_user_message_name: Style::default().fg(Color::Rgb(0, 180, 120)).bold(),
+            // chat_model_message_name: Style::default().fg(Color::Rgb(150, 150, 255)).bold(),
             chat_model_message_name: Style::default().fg(Color::Rgb(150, 150, 255)).bold(),
+            // chat_system_message_name: Style::default().fg(Color::Rgb(255, 120, 120)).bold(),
             chat_system_message_name: Style::default().fg(Color::Rgb(255, 120, 120)).bold(),
 
             log_level_trace: Style::default().fg(Color::Rgb(120, 120, 120)),
