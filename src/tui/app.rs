@@ -627,6 +627,12 @@ fn parse_keybindings(cfg: &crate::config::KeyBindingsConfig) -> HashMap<String, 
     insert!("enter", cfg.enter);
     insert!("up", cfg.up);
     insert!("down", cfg.down);
+
+    map.insert("filter".to_string(), parse_keybinding(&cfg.filter).unwrap_or_else(default_parsed_filter));
+    map.insert("sort".to_string(), parse_keybinding(&cfg.sort).unwrap_or_else(default_parsed_sort));
+    map.insert("bedrock_filter".to_string(), parse_keybinding(&cfg.bedrock.filter).unwrap_or_else(default_parsed_bedrock_filter));
+    map.insert("bedrock_sort".to_string(), parse_keybinding(&cfg.bedrock.sort).unwrap_or_else(default_parsed_bedrock_sort));
+
     map
 }
 
@@ -659,4 +665,11 @@ fn parse_keybinding(s: &str) -> Option<(KeyCode, KeyModifiers)> {
         _ => return None,
     };
     Some((code, mods))
-} 
+}
+
+fn default_parsed_up() -> (KeyCode, KeyModifiers) { (KeyCode::Up, KeyModifiers::NONE) }
+fn default_parsed_down() -> (KeyCode, KeyModifiers) { (KeyCode::Down, KeyModifiers::NONE) }
+fn default_parsed_filter() -> (KeyCode, KeyModifiers) { (KeyCode::Char('F'), KeyModifiers::NONE) }
+fn default_parsed_sort() -> (KeyCode, KeyModifiers) { (KeyCode::Char('S'), KeyModifiers::NONE) }
+fn default_parsed_bedrock_filter() -> (KeyCode, KeyModifiers) { (KeyCode::Char('f'), KeyModifiers::NONE) }
+fn default_parsed_bedrock_sort() -> (KeyCode, KeyModifiers) { (KeyCode::Char('s'), KeyModifiers::NONE) } 

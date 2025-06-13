@@ -177,12 +177,12 @@ impl Default for OllamaConfig {
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct BedrockFiltersConfig {
-    #[serde(default = "default_bedrock_filter")] pub default: String,
+    #[serde(default = "default_bedrock_filter_name")] pub default: String,
     #[serde(default)] pub available_to_request_access: Option<BedrockFilterDefinition>,
     #[serde(default)] pub available_to_use: Option<BedrockFilterDefinition>,
 }
 
-fn default_bedrock_filter() -> String { "available_to_use".to_string() }
+fn default_bedrock_filter_name() -> String { "available_to_use".to_string() }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 #[serde(deny_unknown_fields)]
@@ -217,7 +217,7 @@ impl Default for BedrockConfig {
             region: default_bedrock_region(),
             profile: default_bedrock_profile(),
             filters: BedrockFiltersConfig {
-                default: default_bedrock_filter(),
+                default: default_bedrock_filter_name(),
                 available_to_request_access: Some(BedrockFilterDefinition {
                     description: "Models you can request access to".to_string(),
                 }),
@@ -252,7 +252,7 @@ fn default_rotate_daily() -> bool {
     true
 }
 fn default_retain_days() -> u32 {
-    14
+    7
 }
 
 impl Default for LoggingConfig {
@@ -280,10 +280,10 @@ pub struct TmuxConfig {
 }
 
 fn default_session_prefix() -> String {
-    "hydravisor-".to_string()
+    "hydra-".to_string()
 }
 fn default_record_all_sessions() -> bool {
-    true
+    false
 }
 fn default_record_format() -> String {
     "ansi".to_string()
@@ -315,13 +315,13 @@ pub struct McpConfig {
 }
 
 fn default_mcp_socket_path() -> String {
-    "/tmp/hydravisor.sock".to_string()
+    "/tmp/hydravisor_mcp.sock".to_string()
 }
 fn default_mcp_timeout_ms() -> u64 {
-    3000
+    2000
 }
 fn default_mcp_heartbeat_interval() -> u64 {
-    15
+    30
 }
 
 impl Default for McpConfig {
@@ -350,6 +350,29 @@ pub struct KeyBindingsConfig {
     #[serde(default = "default_down")] pub down: String,
     #[serde(default = "default_filter")] pub filter: String,
     #[serde(default = "default_sort")] pub sort: String,
+    #[serde(default)]
+    pub bedrock: BedrockKeyBindings,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct BedrockKeyBindings {
+    #[serde(default = "default_bedrock_filter")]
+    pub filter: String,
+    #[serde(default = "default_bedrock_sort")]
+    pub sort: String,
+}
+
+fn default_bedrock_filter() -> String { "f".to_string() }
+fn default_bedrock_sort() -> String { "s".to_string() }
+
+impl Default for BedrockKeyBindings {
+    fn default() -> Self {
+        Self {
+            filter: default_bedrock_filter(),
+            sort: default_bedrock_sort(),
+        }
+    }
 }
 
 fn default_quit() -> String { "q".to_string() }
@@ -382,6 +405,7 @@ impl Default for KeyBindingsConfig {
             down: default_down(),
             filter: default_filter(),
             sort: default_sort(),
+            bedrock: BedrockKeyBindings::default(),
         }
     }
 }
@@ -413,49 +437,37 @@ impl Config {
     pub fn load(config_path_override: Option<&Path>) -> Result<Self> {
         let xdg_dirs = BaseDirectories::with_prefix(APP_NAME)?;
         let config_path = match config_path_override {
-            Some(path) => path.to_path_buf(),
+            Some(path) => {
+                debug!("Using provided config path override: {}", path.display());
+                path.to_path_buf()
+            }
             None => xdg_dirs
                 .find_config_file(DEFAULT_CONFIG_FILENAME)
-                .unwrap_or_else(|| xdg_dirs.get_config_home().join(DEFAULT_CONFIG_FILENAME)),
+                .with_context(|| {
+                    format!(
+                        "Could not find default config file '{}'",
+                        DEFAULT_CONFIG_FILENAME
+                    )
+                })?,
         };
 
-        info!("Attempting to load configuration from: {:?}", config_path);
+        info!("Loading configuration from {}", config_path.display());
+        let config_str = std::fs::read_to_string(&config_path)
+            .with_context(|| format!("Failed to read config file at {}", config_path.display()))?;
 
-        let mut loaded_config: Config = if config_path.exists() {
-            let config_str = std::fs::read_to_string(&config_path)
-                .with_context(|| format!("Failed to read config file: {:?}", config_path))?;
-            toml::from_str(&config_str)
-                .with_context(|| format!("Failed to parse TOML from config file: {:?}", config_path))?
-        } else {
-            warn!("Config file not found at {:?}. Using default configuration.", config_path);
-            Config::default()
-        };
+        let mut config: Config = toml::from_str(&config_str)
+            .with_context(|| "Failed to parse TOML configuration")?;
 
-        // Resolve paths for other config files (policy.toml, ssh.toml)
-        // These are expected to be in the same directory as config.toml or XDG config dir
-        let config_dir: PathBuf = config_path.parent().map(Path::to_path_buf).unwrap_or_else(|| xdg_dirs.get_config_home());
+        // Resolve paths for other config files relative to the main config file's directory
+        let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
+        config.policy_file_path = xdg_dirs
+            .find_config_file(DEFAULT_POLICY_FILENAME)
+            .or_else(|| Some(config_dir.join(DEFAULT_POLICY_FILENAME)));
+        config.ssh_config_file_path = xdg_dirs
+            .find_config_file(DEFAULT_SSH_CONFIG_FILENAME)
+            .or_else(|| Some(config_dir.join(DEFAULT_SSH_CONFIG_FILENAME)));
 
-        let policy_path = config_dir.join(DEFAULT_POLICY_FILENAME);
-        if policy_path.exists() {
-            debug!("Found policy file at: {:?}", policy_path);
-            loaded_config.policy_file_path = Some(policy_path);
-        } else {
-            warn!("Policy file ({}) not found in config directory {:?}. Policy features may be limited.", DEFAULT_POLICY_FILENAME, config_dir);
-        }
-
-        let ssh_config_path = config_dir.join(DEFAULT_SSH_CONFIG_FILENAME);
-        if ssh_config_path.exists() {
-            debug!("Found SSH config file at: {:?}", ssh_config_path);
-            loaded_config.ssh_config_file_path = Some(ssh_config_path);
-        } else {
-            // This might be fine, as SSH can fall back to system/user ~/.ssh/config
-            info!("Optional SSH config file ({}) not found in config directory {:?}. Will use system SSH config.", DEFAULT_SSH_CONFIG_FILENAME, config_dir);
-        }
-        
-        // TODO: Expand paths like ~/ in log_dir, etc.
-        // Example: loaded_config.logging.log_dir = shellexpand::tilde(&loaded_config.logging.log_dir).into_owned();
-
-        Ok(loaded_config)
+        Ok(config)
     }
 
     pub fn get_system_prompt_for_model(&self, model_name: &str) -> Option<String> {

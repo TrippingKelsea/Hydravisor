@@ -344,13 +344,13 @@ fn handle_normal_mode_key(app: &mut App, key_event: KeyEvent) {
     // View-specific key handling for Bedrock
     #[cfg(feature = "bedrock_integration")]
     if app.active_view == AppView::BedrockModelList {
-        if key_matches(app, "filter", &key_event) {
+        if key_matches(app, "bedrock_filter", &key_event) {
             // Manually define the available filters since they are struct fields, not a map
             let filters = ["available_to_use", "available_to_request_access"];
             let idx = filters.iter().position(|&f| f == app.current_bedrock_filter).unwrap_or(0);
             let next_idx = (idx + 1) % filters.len();
             app.current_bedrock_filter = filters[next_idx].to_string();
-        } else if key_matches(app, "sort", &key_event) {
+        } else if key_matches(app, "bedrock_sort", &key_event) {
             // Currently, only one sort is implemented, so we can just log or do nothing.
             // When more are added, this can cycle like the filters.
             let sorts = ["alphabetical"]; // The only sort option for now
