@@ -9,7 +9,7 @@ use crate::config::Config;
 use crate::policy::PolicyEngine;
 use crate::session_manager::SessionManager;
 use crate::libvirt_manager::LibvirtManager;
-use crate::audit_engine::AuditEngine;
+use crate::audit::AuditEngine;
 
 use anyhow::Result;
 

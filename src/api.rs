@@ -1,11 +1,7 @@
-// src/mcp.rs
-// Model Context Protocol implementation
+// src/api.rs
+// Defines the external API structures for Hydravisor, including the Model Context Protocol (MCP).
 
 use serde::{Deserialize, Serialize};
-// use tokio::net::{UnixListener, UnixStream}; // For Unix domain socket
-// use tokio::sync::mpsc; // For message passing between MCP server and other parts of Hydravisor
-
-// use crate::errors::HydraError; // Not used yet
 
 // Core MCP message structure (as per mcp.design.md)
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -39,18 +35,4 @@ pub struct McpMeta {
     pub name: Option<String>,           // e.g., "llama-sandbox" for vm/create
     pub record_session: Option<bool>,
     // Add other meta fields as needed
-}
-
-// Since McpServer and McpClient are not used, these structs can be removed.
-// pub struct McpClient { ... }
-// pub struct McpServer { ... }
-// pub struct McpMessageWithOrigin { ... }
-
-// The implementation for McpServer is also unused.
-// impl McpServer { ... }
-
-// TODO: Add tests for MCP message serialization/deserialization.
-// TODO: Add tests for MCP server logic (mocking client connections and core dispatcher).
-// - Test client connection and disconnection.
-// - Test message routing (mocked).
-// - Test error handling for malformed messages or unauthorized requests. 
+} 

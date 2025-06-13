@@ -10,7 +10,7 @@ use crate::config::Config as AppConfig;
 use crate::libvirt_manager::LibvirtManager;
 use crate::policy::PolicyEngine;
 use crate::ssh_manager::SshManager;
-use crate::audit_engine::AuditEngine;
+use crate::audit::AuditEngine;
 // use crate::errors::HydraError; // Commented out as it's unused
 
 // Represents an active Hydravisor session (agent workspace)

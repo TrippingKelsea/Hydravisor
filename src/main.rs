@@ -10,8 +10,6 @@ mod errors;
 mod logging;
 mod tui;
 // Placeholders for other modules based on design
-mod audit_engine;
-mod mcp;
 mod policy;
 mod session_manager;
 mod ssh_manager;
@@ -29,7 +27,7 @@ use cli::Cli;
 use config::{Config, APP_NAME}; // Import APP_NAME
 use policy::PolicyEngine;
 use ssh_manager::SshManager;
-use audit_engine::AuditEngine;
+use audit::AuditEngine;
 use libvirt_manager::LibvirtManager;
 use session_manager::SessionManager;
 use ollama_manager::OllamaManager;

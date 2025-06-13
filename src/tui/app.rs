@@ -22,7 +22,7 @@ use crate::config::Config;
 use crate::session_manager::SessionManager;
 use crate::policy::PolicyEngine;
 use crate::libvirt_manager::{LibvirtManager, VmStatus};
-use crate::audit_engine::AuditEngine;
+use crate::audit::AuditEngine;
 use crate::ollama_manager::OllamaManager;
 #[cfg(feature = "bedrock_integration")]
 use crate::bedrock_manager::BedrockManager;

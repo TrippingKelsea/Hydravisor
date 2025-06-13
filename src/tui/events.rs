@@ -13,9 +13,6 @@ use std::sync::Arc;
 use super::app::{App, AppEvent, AppView, ChatMessage, ChatSession, InputMode};
 use super::ui::ui;
 
-#[cfg(feature = "bedrock_integration")]
-use aws_sdk_bedrock::types::FoundationModelSummary;
-
 pub async fn run_app_loop(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     mut app: App,

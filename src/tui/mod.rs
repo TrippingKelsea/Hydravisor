@@ -24,7 +24,7 @@ use events::run_app_loop;
 
 // Import necessary concrete types for the function signature
 use crate::{
-    audit_engine::AuditEngine,
+    audit::AuditEngine,
     config::Config,
     libvirt_manager::LibvirtManager,
     ollama_manager::OllamaManager,
