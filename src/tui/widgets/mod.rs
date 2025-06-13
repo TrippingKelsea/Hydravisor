@@ -16,9 +16,6 @@ pub mod bedrock_model_list;
 // pub use status_bar::StatusBarWidget;
 // etc.
 
-pub use self::ollama_model_list::OllamaModelListWidget;
-pub use self::status_bar::StatusBarWidget;
-pub use self::vm_list::VmListWidget;
 
 #[cfg(feature = "bedrock_integration")]
 pub use self::bedrock_model_list::BedrockModelListWidget;

@@ -174,6 +174,22 @@ impl Default for OllamaConfig {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub struct BedrockFiltersConfig {
+    #[serde(default = "default_bedrock_filter")] pub default: String,
+    #[serde(default)] pub available_to_request_access: Option<BedrockFilterDefinition>,
+    #[serde(default)] pub available_to_use: Option<BedrockFilterDefinition>,
+}
+
+fn default_bedrock_filter() -> String { "available_to_use".to_string() }
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub struct BedrockFilterDefinition {
+    pub description: String,
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct BedrockConfig {
@@ -183,6 +199,8 @@ pub struct BedrockConfig {
     pub region: String,
     #[serde(default = "default_bedrock_profile")]
     pub profile: String,
+    #[serde(default)]
+    pub filters: BedrockFiltersConfig,
 }
 
 fn default_bedrock_region() -> String {
@@ -198,6 +216,15 @@ impl Default for BedrockConfig {
             enabled: false, // Typically opt-in
             region: default_bedrock_region(),
             profile: default_bedrock_profile(),
+            filters: BedrockFiltersConfig {
+                default: default_bedrock_filter(),
+                available_to_request_access: Some(BedrockFilterDefinition {
+                    description: "Models you can request access to".to_string(),
+                }),
+                available_to_use: Some(BedrockFilterDefinition {
+                    description: "Models you can use now".to_string(),
+                }),
+            },
         }
     }
 }
@@ -321,6 +348,8 @@ pub struct KeyBindingsConfig {
     #[serde(default = "default_enter")] pub enter: String,
     #[serde(default = "default_up")] pub up: String,
     #[serde(default = "default_down")] pub down: String,
+    #[serde(default = "default_filter")] pub filter: String,
+    #[serde(default = "default_sort")] pub sort: String,
 }
 
 fn default_quit() -> String { "q".to_string() }
@@ -334,6 +363,8 @@ fn default_edit() -> String { "e".to_string() }
 fn default_enter() -> String { "Enter".to_string() }
 fn default_up() -> String { "Up".to_string() }
 fn default_down() -> String { "Down".to_string() }
+fn default_filter() -> String { "F".to_string() }
+fn default_sort() -> String { "S".to_string() }
 
 impl Default for KeyBindingsConfig {
     fn default() -> Self {
@@ -349,6 +380,8 @@ impl Default for KeyBindingsConfig {
             enter: default_enter(),
             up: default_up(),
             down: default_down(),
+            filter: default_filter(),
+            sort: default_sort(),
         }
     }
 }

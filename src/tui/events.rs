@@ -1,20 +1,20 @@
 // src/tui/events.rs
 
 use anyhow::Result;
-use crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind, EventStream};
+use crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEvent, MouseEvent, MouseEventKind, EventStream};
 use futures::StreamExt;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use std::io::Stdout;
 use std::time::{Duration, Instant};
 use tracing::{error};
-use chrono::Local;
 use std::sync::Arc;
 
-use crate::env_manager::{EnvironmentConfig, EnvironmentType};
-use super::app::{App, AppEvent, ChatMessage, ChatSession, ChatStreamEvent, InputMode};
+use super::app::{App, AppEvent, AppView, ChatMessage, ChatSession, InputMode};
 use super::ui::ui;
-use super::app::parse_ram_str;
+
+#[cfg(feature = "bedrock_integration")]
+use aws_sdk_bedrock::types::FoundationModelSummary;
 
 pub async fn run_app_loop(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
@@ -45,7 +45,7 @@ pub async fn run_app_loop(
             let overflow = app.log_entries.len() - max_logs;
             app.log_entries.drain(0..overflow);
         }
-        if app.active_view == crate::tui::app::AppView::Logs {
+        if app.active_view == AppView::Logs {
             let is_scrolled_to_bottom = match app.log_list_state.selected() {
                 Some(index) => index >= app.log_entries.len().saturating_sub(1),
                 None => true,
@@ -105,7 +105,7 @@ pub async fn run_app_loop(
             // Handle tick for periodic updates
             _ = tokio::time::sleep(tick_duration) => {
                  if last_tick.elapsed() >= tick_duration {
-                    on_tick(&mut app);
+                    app.tick();
                     app.event_sender.send(AppEvent::FetchVms).unwrap(); // Send event to refresh
                     #[cfg(feature = "ollama_integration")]
                     app.event_sender.send(AppEvent::FetchOllamaModels).unwrap(); // Send event to refresh
@@ -123,169 +123,122 @@ pub async fn run_app_loop(
 }
 
 pub fn on_tick(app: &mut App) {
-    // --- CHAT STREAM HANDLING ---
-    if let Some(ref mut receiver) = app.chat_stream_receiver {
-        while let Ok(event) = receiver.try_recv() {
-            if let Some(session) = app.active_chat.as_mut() {
-                match event {
-                    ChatStreamEvent::Chunk(chunk) => {
-                        if let Some(last_message) = session.messages.last_mut() {
-                            if last_message.sender == session.model_name {
-                                last_message.content.push_str(&chunk);
-                            } else {
-                                session.messages.push(ChatMessage {
-                                    sender: session.model_name.clone(),
-                                    content: chunk,
-                                    timestamp: Local::now().format("%H:%M:%S").to_string(),
-                                    thought: None,
-                                });
-                            }
-                            } else {
-                            session.messages.push(ChatMessage {
-                                sender: session.model_name.clone(),
-                                content: chunk,
-                                timestamp: Local::now().format("%H:%M:%S").to_string(),
-                                thought: None,
-                            });
-                        }
-                    },
-                    ChatStreamEvent::Error(err_msg) => {
-                         session.messages.push(ChatMessage {
-                            sender: "System".to_string(),
-                            content: format!("Error: {}", err_msg),
-                            timestamp: Local::now().format("%H:%M:%S").to_string(),
-                            thought: None,
-                        });
-                        session.is_streaming = false;
-                    },
-                    ChatStreamEvent::Completed => {
-                        session.is_streaming = false;
-                    }
-                }
-            }
-        }
-    }
-
-    if app.active_view == crate::tui::app::AppView::Chat && app.active_chat.as_ref().map_or(false, |s| s.is_streaming) {
-         if !app.active_chat.as_ref().unwrap().messages.is_empty() {
-            app.chat_list_state.select(Some(app.active_chat.as_ref().unwrap().messages.len() - 1));
-        }
-    }
+    // This is now handled in app.tick()
 }
 
 pub fn on_mouse_event(app: &mut App, mouse_event: MouseEvent) {
     match mouse_event.kind {
         MouseEventKind::ScrollUp => {
             match app.active_view {
-                crate::tui::app::AppView::VmList => app.select_previous_item_in_vm_list(),
-                crate::tui::app::AppView::OllamaModelList => app.select_previous_item_in_ollama_list(),
+                AppView::VmList => app.select_previous_item_in_vm_list(),
+                AppView::OllamaModelList => app.select_previous_item_in_ollama_list(),
                 #[cfg(feature = "bedrock_integration")]
-                crate::tui::app::AppView::BedrockModelList => app.select_previous_item_in_bedrock_list(),
-                crate::tui::app::AppView::Chat => app.scroll_chat_up(),
-                crate::tui::app::AppView::Logs => app.scroll_logs_up(),
+                AppView::BedrockModelList => app.select_previous_item_in_bedrock_list(),
+                AppView::Chat => app.scroll_chat_up(),
+                AppView::Logs => app.scroll_logs_up(),
             }
         }
         MouseEventKind::ScrollDown => {
             match app.active_view {
-                crate::tui::app::AppView::VmList => app.select_next_item_in_vm_list(),
-                crate::tui::app::AppView::OllamaModelList => app.select_next_item_in_ollama_list(),
+                AppView::VmList => app.select_next_item_in_vm_list(),
+                AppView::OllamaModelList => app.select_next_item_in_ollama_list(),
                 #[cfg(feature = "bedrock_integration")]
-                crate::tui::app::AppView::BedrockModelList => app.select_next_item_in_bedrock_list(),
-                crate::tui::app::AppView::Chat => app.scroll_chat_down(),
-                crate::tui::app::AppView::Logs => app.scroll_logs_down(),
+                AppView::BedrockModelList => app.select_next_item_in_bedrock_list(),
+                AppView::Chat => app.scroll_chat_down(),
+                AppView::Logs => app.scroll_logs_down(),
             }
         }
         _ => {}
     }
 }
 
+fn key_matches(app: &App, action: &str, key_event: &KeyEvent) -> bool {
+    if let Some((code, mods)) = app.keybinding_map.get(action) {
+        key_event.code == *code && key_event.modifiers == *mods
+    } else {
+        false
+    }
+}
+
 pub fn on_key(app: &mut App, key_event: KeyEvent) {
     if app.show_keybindings_modal {
-        if key_event.code == KeyCode::Esc {
+        if key_matches(app, "help", &key_event) || key_event.code == KeyCode::Esc {
             app.show_keybindings_modal = false;
         }
         return;
     }
     if app.show_about_modal {
-        match key_event.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
-                app.show_about_modal = false;
-            }
-            _ => {}
+        if key_matches(app, "help", &key_event) || key_event.code == KeyCode::Esc || key_event.code == KeyCode::Char('q') {
+            app.show_about_modal = false;
         }
         return;
     }
     if app.show_menu {
         match app.menu_level {
-            0 => {
-                match key_event.code {
-                    KeyCode::Char('h') | KeyCode::Esc => app.show_menu = false,
-                    KeyCode::Down | KeyCode::Char('j') => app.menu_next(),
-                    KeyCode::Up | KeyCode::Char('k') => app.menu_previous(),
-                    KeyCode::Enter => {
-                        if let Some(selected) = app.menu_state.selected() {
-                            match selected {
-                                0 => { // About
-                                    app.show_about_modal = true;
-                                    app.show_menu = false;
-                                },
-                                1 => { // Preferences
-                                    app.menu_level = 1;
-                                    app.menu_sub_state.select(Some(0));
-                                },
-                                2 => app.should_quit = true, // Quit
-                                _ => {}
-                            }
+            0 => { // Main Menu
+                if key_matches(app, "menu", &key_event) || key_event.code == KeyCode::Esc {
+                    app.show_menu = false;
+                } else if key_matches(app, "down", &key_event) || key_event.code == KeyCode::Char('j') {
+                    app.menu_next();
+                } else if key_matches(app, "up", &key_event) || key_event.code == KeyCode::Char('k') {
+                    app.menu_previous();
+                } else if key_matches(app, "enter", &key_event) || key_event.code == KeyCode::Enter {
+                    if let Some(selected) = app.menu_state.selected() {
+                        let item_name = match selected {
+                            0 => "About",
+                            1 => "Preferences",
+                            2 => "Quit",
+                            _ => "",
+                        };
+                        match item_name {
+                            "About" => {
+                                app.show_about_modal = true;
+                                app.show_menu = false;
+                            },
+                            "Preferences" => {
+                                app.menu_level = 1;
+                                app.menu_sub_state.select(Some(0));
+                            },
+                            "Quit" => app.should_quit = true,
+                            _ => {}
                         }
                     }
-                    _ => {}
                 }
-            }
-            1 => {
-                match key_event.code {
-                    KeyCode::Esc => {
-                        app.menu_level = 0;
-                        app.menu_sub_state.select(None);
-                    },
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        let idx = app.menu_sub_state.selected().unwrap_or(0);
-                        let next = (idx + 1) % 1; // Only one item for now
-                        app.menu_sub_state.select(Some(next));
-                    },
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        let idx = app.menu_sub_state.selected().unwrap_or(0);
-                        let prev = if idx == 0 { 0 } else { idx - 1 };
-                        app.menu_sub_state.select(Some(prev));
-                    },
-                    KeyCode::Enter => {
-                        if let Some(selected) = app.menu_sub_state.selected() {
-                            match selected {
-                                0 => { // Keybindings
-                                    app.show_keybindings_modal = true;
-                                    app.show_menu = false;
-                                    app.menu_level = 0;
-                                    app.menu_sub_state.select(None);
-                                },
-                                _ => {}
+            },
+            1 => { // Preferences Submenu
+                if key_matches(app, "menu", &key_event) || key_event.code == KeyCode::Esc {
+                    app.menu_level = 0;
+                    app.menu_state.select(Some(1)); // Reselect "Preferences"
+                } else if key_matches(app, "down", &key_event) || key_event.code == KeyCode::Char('j') {
+                    app.menu_next();
+                } else if key_matches(app, "up", &key_event) || key_event.code == KeyCode::Char('k') {
+                    app.menu_previous();
+                } else if key_matches(app, "enter", &key_event) || key_event.code == KeyCode::Enter {
+                     if let Some(selected) = app.menu_sub_state.selected() {
+                        let item_name = match selected {
+                            0 => "Key Bindings",
+                            1 => "Back",
+                            _ => "",
+                        };
+                        match item_name {
+                            "Key Bindings" => {
+                                app.show_keybindings_modal = true;
+                                app.show_menu = false;
+                            },
+                            "Back" => {
+                                app.menu_level = 0;
+                                app.menu_state.select(Some(1));
                             }
+                            _ => {}
                         }
                     }
-                    _ => {}
                 }
-            }
-            _ => {}
+            },
+            _ => {} // Should not happen
         }
         return;
     }
-    if let KeyCode::Char('h') = key_event.code {
-        if key_event.modifiers == KeyModifiers::CONTROL {
-            app.show_menu = !app.show_menu;
-            app.menu_state.select(Some(0));
-            app.menu_level = 0;
-            app.menu_sub_state.select(None);
-            return;
-        }
-    }
+
     match app.input_mode {
         InputMode::Normal => handle_normal_mode_key(app, key_event),
         InputMode::Editing => handle_editing_mode_key(app, key_event),
@@ -295,356 +248,224 @@ pub fn on_key(app: &mut App, key_event: KeyEvent) {
 }
 
 fn handle_normal_mode_key(app: &mut App, key_event: KeyEvent) {
-    // Global tab navigation
-    if key_event.code == KeyCode::Tab {
+    if key_matches(app, "quit", &key_event) {
+        app.should_quit = true;
+    } else if key_matches(app, "next_tab", &key_event) {
         app.active_view = app.active_view.next();
-        return;
-    }
-    if key_event.code == KeyCode::BackTab {
+    } else if key_matches(app, "prev_tab", &key_event) {
         app.active_view = app.active_view.previous();
-        return;
-    }
-
-    match app.active_view {
-        crate::tui::app::AppView::VmList => match key_event.code {
-            KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Char('i') => app.input_mode = InputMode::Editing,
-            KeyCode::Char('n') => {
-                app.show_new_vm_popup = true;
-                app.input_mode = InputMode::VmWizard;
-                app.active_new_vm_input_idx = 0;
-            },
-            KeyCode::Down | KeyCode::Char('j') => app.select_next_item_in_vm_list(),
-            KeyCode::Up | KeyCode::Char('k') => app.select_previous_item_in_vm_list(),
-            KeyCode::Char('d') => {
-                if let Some(selected_index) = app.vm_list_state.selected() {
-                    if let Some(vm) = app.vms.get(selected_index) {
-                        app.vm_to_destroy = Some(vm.name.clone());
-                        app.input_mode = InputMode::ConfirmingDestroy;
+    } else if key_matches(app, "menu", &key_event) {
+        app.show_menu = !app.show_menu;
+        if app.show_menu {
+            app.menu_state.select(Some(0));
+            app.menu_level = 0;
+        }
+    } else if key_matches(app, "down", &key_event) || key_event.code == KeyCode::Char('j') {
+        match app.active_view {
+            AppView::VmList => app.select_next_item_in_vm_list(),
+            AppView::OllamaModelList => app.select_next_item_in_ollama_list(),
+            #[cfg(feature = "bedrock_integration")]
+            AppView::BedrockModelList => app.select_next_item_in_bedrock_list(),
+            AppView::Chat => app.scroll_chat_down(),
+            AppView::Logs => app.scroll_logs_down(),
+        }
+    } else if key_matches(app, "up", &key_event) || key_event.code == KeyCode::Char('k') {
+        match app.active_view {
+            AppView::VmList => app.select_previous_item_in_vm_list(),
+            AppView::OllamaModelList => app.select_previous_item_in_ollama_list(),
+            #[cfg(feature = "bedrock_integration")]
+            AppView::BedrockModelList => app.select_previous_item_in_bedrock_list(),
+            AppView::Chat => app.scroll_chat_up(),
+            AppView::Logs => app.scroll_logs_up(),
+        }
+    } else if key_matches(app, "enter", &key_event) {
+        match app.active_view {
+            #[cfg(feature = "ollama_integration")]
+            AppView::OllamaModelList => {
+                if let Some(selected_index) = app.ollama_model_list_state.selected() {
+                    let selected_model = &app.ollama_models[selected_index];
+                    let selected_model_name = selected_model.name.clone();
+                    if app.active_chat.as_ref().map_or(true, |c| c.model_name != selected_model_name) {
+                        app.active_chat = Some(ChatSession {
+                            model_name: selected_model_name.clone(),
+                            messages: vec![ChatMessage {
+                                sender: "System".to_string(),
+                                content: app.get_active_system_prompt(&selected_model_name),
+                                timestamp: "".to_string(),
+                                thought: None,
+                            }],
+                            is_streaming: false,
+                        });
                     }
+                    app.active_view = AppView::Chat;
+                    app.chat_list_state.select(None);
                 }
             },
-            KeyCode::Enter => {
+            _ => {}
+        }
+    } else if key_matches(app, "edit", &key_event) {
+        match app.active_view {
+            #[cfg(feature = "ollama_integration")]
+            AppView::OllamaModelList => {
+                if let Some(selected_index) = app.ollama_model_list_state.selected() {
+                    let model_name = app.ollama_models[selected_index].name.clone();
+                    let prompt = app.get_active_system_prompt(&model_name);
+                    app.editing_system_prompt_for_model = Some(model_name);
+                    app.current_input = prompt;
+                    app.input_mode = InputMode::Editing;
+                    app.reset_cursor_position();
+                }
+            },
+            _ => {}
+        }
+    } else if key_matches(app, "refresh", &key_event) {
+        app.event_sender.send(AppEvent::FetchVms).unwrap();
+        #[cfg(feature = "ollama_integration")]
+        app.event_sender.send(AppEvent::FetchOllamaModels).unwrap();
+        #[cfg(feature = "bedrock_integration")]
+        app.event_sender.send(AppEvent::FetchBedrockModels).unwrap();
+    } else if key_matches(app, "delete", &key_event) {
+        match app.active_view {
+            AppView::VmList => {
                 if let Some(selected_index) = app.vm_list_state.selected() {
-                    if let Some(vm) = app.vms.get(selected_index) {
-                        app.event_sender.send(AppEvent::ResumeVm(vm.name.clone())).unwrap();
-                    }
+                    let vm_name = app.vms[selected_index].name.clone();
+                    app.vm_to_destroy = Some(vm_name);
+                    app.input_mode = InputMode::ConfirmingDestroy;
                 }
             }
-            _ => {} 
-        },
-        crate::tui::app::AppView::OllamaModelList => match key_event.code {
-            KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Down | KeyCode::Char('j') => app.select_next_item_in_ollama_list(),
-            KeyCode::Up | KeyCode::Char('k') => app.select_previous_item_in_ollama_list(),
-            KeyCode::Enter => {
-                if let Some(selected_index) = app.ollama_model_list_state.selected() {
-                    if let Some(selected_model) = app.ollama_models.get(selected_index) {
-                        let selected_model_name = selected_model.name.clone();
-                        if app.active_chat.as_ref().map_or(true, |c| c.model_name != selected_model_name) {
-                            app.active_chat = Some(ChatSession {
-                                model_name: selected_model_name.clone(),
-                                messages: Vec::new(),
-                                is_streaming: false,
-                            });
-                            app.active_view = crate::tui::app::AppView::Chat;
-                            app.input_mode = InputMode::Editing;
-                        }
-                    }
-                }
-            },
-            KeyCode::Char('e') => {
-                if let Some(selected_index) = app.ollama_model_list_state.selected() {
-                    if let Some(selected_model) = app.ollama_models.get(selected_index) {
-                        app.editing_system_prompt_for_model = Some(selected_model.name.clone());
-                        app.current_input = app.get_active_system_prompt(&selected_model.name);
-                        app.input_mode = InputMode::Editing;
-                        app.reset_cursor_position();
-                    }
-                }
-            },
             _ => {}
-        },
-        #[cfg(feature = "bedrock_integration")]
-        crate::tui::app::AppView::BedrockModelList => match key_event.code {
-            KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Down | KeyCode::Char('j') => app.select_next_item_in_bedrock_list(),
-            KeyCode::Up | KeyCode::Char('k') => app.select_previous_item_in_bedrock_list(),
-            _ => {}
-        },
-        crate::tui::app::AppView::Chat => match key_event.code {
-            KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Char('i') => {
-                app.input_mode = InputMode::Editing;
-                app.current_input.clear();
-                app.reset_cursor_position();
-            },
-            KeyCode::Down | KeyCode::Char('j') => app.scroll_chat_down(),
-            KeyCode::Up | KeyCode::Char('k') => app.scroll_chat_up(),
-            _ => {}
-        },
-        crate::tui::app::AppView::Logs => match key_event.code {
-            KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Down | KeyCode::Char('j') => app.scroll_logs_down(),
-            KeyCode::Up | KeyCode::Char('k') => app.scroll_logs_up(),
-            _ => {}
-        },
+        }
+    } else if key_matches(app, "new_vm", &key_event) {
+        app.show_new_vm_popup = true;
+        app.input_mode = InputMode::VmWizard;
+        app.active_new_vm_input_idx = 0;
+    }
+
+    // View-specific key handling for Bedrock
+    #[cfg(feature = "bedrock_integration")]
+    if app.active_view == AppView::BedrockModelList {
+        if key_matches(app, "filter", &key_event) {
+            // Manually define the available filters since they are struct fields, not a map
+            let filters = ["available_to_use", "available_to_request_access"];
+            let idx = filters.iter().position(|&f| f == app.current_bedrock_filter).unwrap_or(0);
+            let next_idx = (idx + 1) % filters.len();
+            app.current_bedrock_filter = filters[next_idx].to_string();
+        } else if key_matches(app, "sort", &key_event) {
+            // Currently, only one sort is implemented, so we can just log or do nothing.
+            // When more are added, this can cycle like the filters.
+            let sorts = ["alphabetical"]; // The only sort option for now
+            let idx = sorts.iter().position(|&s| s == app.current_bedrock_sort).unwrap_or(0);
+            let next_idx = (idx + 1) % sorts.len();
+            app.current_bedrock_sort = sorts[next_idx].to_string();
+        }
     }
 }
 
 fn handle_editing_mode_key(app: &mut App, key_event: KeyEvent) {
     match key_event.code {
-        KeyCode::Esc => {
-            if app.editing_system_prompt_for_model.is_some() {
-                app.current_input.clear();
-                app.editing_system_prompt_for_model = None;
-                app.active_view = crate::tui::app::AppView::OllamaModelList;
+        KeyCode::Enter => {
+            if let Some(model_name) = app.editing_system_prompt_for_model.take() {
+                app.editable_ollama_model_prompts.insert(model_name, app.current_input.clone());
             }
             app.input_mode = InputMode::Normal;
-            app.reset_cursor_position();
-        },
-        KeyCode::Enter => {
-            let input_str = app.current_input.trim().to_string();
-            
-            if let Some(model_name) = app.editing_system_prompt_for_model.take() {
-                app.editable_ollama_model_prompts.insert(model_name, input_str);
-                app.current_input.clear();
-                app.input_mode = InputMode::Normal;
-                app.active_view = crate::tui::app::AppView::OllamaModelList;
-                app.reset_cursor_position();
-                return;
-            }
-
-            if !input_str.is_empty() {
-                if let Some(chat_session) = &mut app.active_chat {
-                    let user_message = ChatMessage {
-                        sender: "User".to_string(),
-                        content: input_str.clone(),
-                        timestamp: Local::now().format("%H:%M:%S").to_string(),
-                        thought: None,
-                    };
-                    chat_session.messages.push(user_message);
-                    chat_session.is_streaming = true;
-
-                    let model_name = chat_session.model_name.clone();
-                    let system_prompt = app.get_active_system_prompt(&model_name);
-
-                    let ollama_manager = Arc::clone(&app.ollama_manager);
-                    let input_str = app.current_input.trim().to_string();
-                    let chat_tx = app.chat_stream_sender.clone();
-                    tokio::spawn(async move {
-                        let user_message = ChatMessage {
-                            sender: "user".to_string(),
-                            content: input_str,
-                            timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
-                            thought: None,
-                        };
-                        let history = vec![user_message];
-                        
-                        let ollama_manager_guard = ollama_manager.lock().await;
-                        match ollama_manager_guard.generate_response_stream(
-                            model_name,
-                            history,
-                            Some(system_prompt),
-                        ).await {
-                            Ok(mut stream) => {
-                                while let Some(res) = stream.next().await {
-                                    match res {
-                                        Ok(response_content) => {
-                                            if let Err(e) = chat_tx.send(ChatStreamEvent::Chunk(response_content)) {
-                                                error!("Failed to send chat chunk: {}", e);
-                                            }
-                                        },
-                                        Err(e) => {
-                                            error!("Error receiving chat chunk: {}", e);
-                                            if let Err(e) = chat_tx.send(ChatStreamEvent::Error(e.to_string())) {
-                                                error!("Failed to send chat stream error: {}", e);
-                                            }
-                                            break; 
-                                        }
-                                    }
-                                }
-                                if let Err(e) = chat_tx.send(ChatStreamEvent::Completed) {
-                                    error!("Failed to send chat stream completion: {}", e);
-                                }
-                            },
-                            Err(e) => { 
-                                error!("Failed to start chat stream: {}", e);
-                                if let Err(e) = chat_tx.send(ChatStreamEvent::Error(e.to_string())) {
-                                   error!("Failed to send chat stream initiation error: {}", e);
-                                }
-                            }
-                        }
-                    });
-                }
-                app.current_input.clear();
-                app.reset_cursor_position();
-                app.input_mode = InputMode::Normal;
-            }
-        },
-        KeyCode::Up | KeyCode::Down => {
-            // Intercept up and down keys to prevent panic.
-            // This is a temporary fix. A full implementation would handle
-            // command history or multiline input navigation.
         }
-        _ => handle_input_bar_key(app, key_event),
-    }
-}
-    
-fn handle_input_bar_key(app: &mut App, key_event: KeyEvent) {
-    match key_event.code {
         KeyCode::Char(c) => {
-            let current_byte_idx = app.current_input.char_indices()
-                .nth(app.input_cursor_char_idx)
-                .map_or(app.current_input.len(), |(idx, _)| idx);
-            app.current_input.insert(current_byte_idx, c);
+            let char_idx = app.input_cursor_char_idx;
+            app.current_input.insert(char_idx, c);
             app.input_cursor_char_idx += 1;
-            app.input_bar_cursor_needs_to_be_visible = true;
-        },
+        }
         KeyCode::Backspace => {
             if app.input_cursor_char_idx > 0 {
-                let current_byte_idx = app.current_input.char_indices()
-                    .nth(app.input_cursor_char_idx)
-                    .map_or(app.current_input.len(), |(idx, _)| idx);
-                
-                let char_before_idx = app.current_input[..current_byte_idx].char_indices().last().map(|(idx, _)| idx);
-                if let Some(idx) = char_before_idx {
-                    app.current_input.remove(idx);
-                    app.input_cursor_char_idx -= 1;
-                }
-                app.input_bar_cursor_needs_to_be_visible = true;
+                app.input_cursor_char_idx -= 1;
+                let char_idx = app.input_cursor_char_idx;
+                app.current_input.remove(char_idx);
             }
-        },
-        KeyCode::Delete => {
-            if app.input_cursor_char_idx < app.current_input.chars().count() {
-                 let current_byte_idx = app.current_input.char_indices()
-                    .nth(app.input_cursor_char_idx)
-                    .map_or(app.current_input.len(), |(idx, _)| idx);
-
-                if current_byte_idx < app.current_input.len() {
-                    app.current_input.remove(current_byte_idx);
-                    }
-                    app.input_bar_cursor_needs_to_be_visible = true;
-                }
-        },
+        }
         KeyCode::Left => {
             if app.input_cursor_char_idx > 0 {
                 app.input_cursor_char_idx -= 1;
-                app.input_bar_cursor_needs_to_be_visible = true;
             }
-        },
+        }
         KeyCode::Right => {
-            if app.input_cursor_char_idx < app.current_input.chars().count() {
+            if app.input_cursor_char_idx < app.current_input.len() {
                 app.input_cursor_char_idx += 1;
-                app.input_bar_cursor_needs_to_be_visible = true;
             }
-        },
-        KeyCode::Home => {
-            app.input_cursor_char_idx = 0;
-            app.input_bar_cursor_needs_to_be_visible = true; 
-        },
-        KeyCode::End => {
-            app.input_cursor_char_idx = app.current_input.chars().count();
-            app.input_bar_cursor_needs_to_be_visible = true;
-        },
+        }
+        KeyCode::Esc => {
+            app.input_mode = InputMode::Normal;
+            app.editing_system_prompt_for_model = None;
+        }
+        // Add Up/Down arrow handling later if needed for multi-line
         _ => {}
     }
+     app.input_bar_cursor_needs_to_be_visible = true;
 }
 
+
 fn handle_vm_wizard_mode_key(app: &mut App, key_event: KeyEvent) {
+    let current_field = match app.active_new_vm_input_idx {
+        0 => &mut app.new_vm_name,
+        1 => {
+            if key_event.code == KeyCode::Enter || key_event.code == KeyCode::Char(' ') {
+                app.new_vm_use_iso = !app.new_vm_use_iso;
+            }
+            // Dummy mutable ref for the match arm
+            &mut String::new()
+        },
+        2 if app.new_vm_use_iso => &mut app.new_vm_iso_path,
+        2 if !app.new_vm_use_iso => &mut app.new_vm_source_image_path,
+        3 => &mut app.new_vm_disk_path,
+        4 => &mut app.new_vm_cpu,
+        5 => &mut app.new_vm_ram_mb,
+        6 => &mut app.new_vm_disk_gb,
+        _ => return,
+    };
+
     match key_event.code {
+        KeyCode::Char(c) => {
+            // Only modify string fields
+            if app.active_new_vm_input_idx != 1 {
+                 current_field.push(c);
+            }
+        },
+        KeyCode::Backspace => {
+            if app.active_new_vm_input_idx != 1 {
+                current_field.pop();
+            }
+        },
+        KeyCode::Tab => {
+            app.active_new_vm_input_idx = (app.active_new_vm_input_idx + 1) % 7;
+        },
+        KeyCode::BackTab => {
+            app.active_new_vm_input_idx = (app.active_new_vm_input_idx + 6) % 7;
+        },
         KeyCode::Enter => {
-            let config = EnvironmentConfig {
-                instance_id: app.new_vm_name.clone(),
-                env_type: EnvironmentType::Vm,
-                base_image: if app.new_vm_use_iso {
-                    String::new()
-                } else {
-                    app.new_vm_source_image_path.clone()
-                },
-                boot_iso: if app.new_vm_use_iso {
-                    Some(app.new_vm_iso_path.clone())
-                } else {
-                    None
-                },
-                cpu_cores: app.new_vm_cpu.parse().unwrap_or(1),
-                memory_mb: parse_ram_str(&app.new_vm_ram_mb).unwrap_or(2048),
-                disk_gb: Some(app.new_vm_disk_gb.parse().unwrap_or(20)),
-                network_policy: "default".to_string(),
-                security_policy: "default".to_string(),
-                custom_script: None,
-                template_name: None,
-                labels: None,
-            };
-
-            let env_manager = Arc::clone(&app.env_manager);
-            tokio::spawn(async move {
-                tracing::info!("Starting VM creation for '{}'", config.instance_id);
-                if let Err(e) = env_manager.lock().await.create_environment(&config) {
-                    tracing::error!("Failed to create VM: {}", e);
-                } else {
-                    tracing::info!("Successfully started VM creation process.");
-                }
-            });
-
-            app.show_new_vm_popup = false;
-            app.input_mode = InputMode::Normal;
+            // Check if on the checkbox, if so, Tab acts as Enter for other fields
+             if app.active_new_vm_input_idx != 1 {
+                app.active_new_vm_input_idx = (app.active_new_vm_input_idx + 1) % 7;
+             }
         }
         KeyCode::Esc => {
             app.show_new_vm_popup = false;
             app.input_mode = InputMode::Normal;
-        }
-        KeyCode::Tab => {
-            let num_fields = 8;
-            app.active_new_vm_input_idx = (app.active_new_vm_input_idx + 1) % num_fields;
-        }
-        KeyCode::BackTab => {
-            let num_fields = 8;
-            app.active_new_vm_input_idx = (app.active_new_vm_input_idx + num_fields - 1) % num_fields;
-        }
-        KeyCode::Char(' ') if app.active_new_vm_input_idx == 6 => {
-                app.new_vm_use_iso = !app.new_vm_use_iso;
-            }
-        KeyCode::Char(c) => {
-            match app.active_new_vm_input_idx {
-            0 => app.new_vm_name.push(c),
-            1 => app.new_vm_source_image_path.push(c),
-            2 => app.new_vm_disk_path.push(c),
-            3 => app.new_vm_cpu.push(c),
-            4 => app.new_vm_ram_mb.push(c),
-            5 => app.new_vm_disk_gb.push(c),
-                7 if app.new_vm_use_iso => app.new_vm_iso_path.push(c),
-            _ => {}
-            }
-        }
-        KeyCode::Backspace => {
-            match app.active_new_vm_input_idx {
-                0 => { app.new_vm_name.pop(); },
-                1 => { app.new_vm_source_image_path.pop(); },
-                2 => { app.new_vm_disk_path.pop(); },
-                3 => { app.new_vm_cpu.pop(); },
-                4 => { app.new_vm_ram_mb.pop(); },
-                5 => { app.new_vm_disk_gb.pop(); },
-                7 if app.new_vm_use_iso => { app.new_vm_iso_path.pop(); },
-                _ => {}
-            }
-        }
+        },
         _ => {}
     }
 }
 
+
 fn handle_confirm_destroy_mode_key(app: &mut App, key_event: KeyEvent) {
     match key_event.code {
-        KeyCode::Char('y') | KeyCode::Enter => {
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
             if let Some(vm_name) = app.vm_to_destroy.take() {
                 app.event_sender.send(AppEvent::DestroyVm(vm_name)).unwrap();
             }
             app.input_mode = InputMode::Normal;
-        }
-        KeyCode::Char('n') | KeyCode::Esc => {
+        },
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
             app.vm_to_destroy = None;
             app.input_mode = InputMode::Normal;
-        },
+        }
         _ => {}
     }
 } 

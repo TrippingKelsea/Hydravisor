@@ -17,19 +17,19 @@ impl MenuWidget {
 
         let theme = &app.theme;
         // Menu structure: Main -> Preferences -> Keybindings
-        let main_items = [
+        let main_items = vec![
             ListItem::new(Line::from(vec![Span::raw("About")])),
             ListItem::new(Line::from(vec![Span::raw("Preferences")])),
             ListItem::new(Line::from(vec![Span::raw("Quit")])),
         ];
-        let prefs_items = [
+        let prefs_items = vec![
             ListItem::new(Line::from(vec![Span::raw("Keybindings")])),
         ];
 
         let (items, title, menu_height) = match app.menu_level {
-            0 => (&main_items[..], "Menu", 6),
-            1 => (&prefs_items[..], "Preferences", 4),
-            _ => (&main_items[..], "Menu", 6),
+            0 => (main_items, "Menu", 6),
+            1 => (prefs_items, "Preferences", 4),
+            _ => (main_items, "Menu", 6),
         };
 
         let list = List::new(items)

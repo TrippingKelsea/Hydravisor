@@ -9,6 +9,8 @@ use tokio::sync::Mutex;
 use tracing::{Level, error};
 use tokio::sync::mpsc;
 use uuid::Uuid;
+use crossterm::event::{KeyCode, KeyModifiers};
+use std::collections::HashMap;
 
 #[cfg(feature = "ollama_integration")]
 use ollama_rs::models::LocalModel;
@@ -24,9 +26,10 @@ use crate::audit_engine::AuditEngine;
 use crate::ollama_manager::OllamaManager;
 #[cfg(feature = "bedrock_integration")]
 use crate::bedrock_manager::BedrockManager;
+#[cfg(feature = "bedrock_integration")]
+use crate::tui::view_mode::list::ListViewMode;
 
 use super::theme::AppTheme;
-use crate::tui::view_mode::list::ListViewMode;
 
 // Define different views for the TUI
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -213,6 +216,13 @@ pub struct App {
 
     pub menu_level: u8, // 0 = main, 1 = preferences
     pub menu_sub_state: ListState,
+
+    pub keybinding_map: HashMap<String, (KeyCode, KeyModifiers)>,
+
+    #[cfg(feature = "bedrock_integration")]
+    pub current_bedrock_filter: String,
+    #[cfg(feature = "bedrock_integration")]
+    pub current_bedrock_sort: String,
 }
 
 impl App {
@@ -236,6 +246,9 @@ impl App {
             initial_editable_prompts = model_prompts.clone();
         }
 
+        #[cfg(feature = "bedrock_integration")]
+        let bedrock_model_view_mode = ListViewMode::new();
+
         let vm_uuid = Uuid::new_v4();
         let mut app = Self {
             should_quit: false,
@@ -257,6 +270,8 @@ impl App {
             ollama_manager,
             #[cfg(feature = "bedrock_integration")]
             bedrock_manager,
+            #[cfg(feature = "bedrock_integration")]
+            bedrock_model_view_mode,
             active_view: AppView::VmList,
             input_mode: InputMode::Normal,
             current_input: String::new(),
@@ -293,11 +308,14 @@ impl App {
             bedrock_connected: false, // Initial state
             event_sender: event_tx,
             event_receiver: Some(event_rx),
-            #[cfg(feature = "bedrock_integration")]
-            bedrock_model_view_mode: ListViewMode::new(),
             show_keybindings_modal: false,
             menu_level: 0,
             menu_sub_state: ListState::default(),
+            keybinding_map: HashMap::new(),
+            #[cfg(feature = "bedrock_integration")]
+            current_bedrock_filter: config.providers.bedrock.filters.default.clone(),
+            #[cfg(feature = "bedrock_integration")]
+            current_bedrock_sort: "alphabetical".to_string(),
         };
         
         // Read README.md for the about modal
@@ -311,6 +329,9 @@ impl App {
                 app.readme_content = format!("Could not read README.md: {}", e);
             }
         }
+
+        let keybinding_map = parse_keybindings(&app.config.keybindings);
+        app.keybinding_map = keybinding_map;
 
         app
     }
@@ -584,4 +605,58 @@ pub fn parse_ram_str(ram_str: &str) -> Result<u64> {
             .parse::<u64>()
             .map_err(anyhow::Error::from)
     }
+}
+
+fn parse_keybindings(cfg: &crate::config::KeyBindingsConfig) -> HashMap<String, (KeyCode, KeyModifiers)> {
+    let mut map = HashMap::new();
+    macro_rules! insert {
+        ($action:expr, $binding:expr) => {
+            if let Some((code, mods)) = parse_keybinding(&$binding) {
+                map.insert($action.to_string(), (code, mods));
+            }
+        };
+    }
+    insert!("quit", cfg.quit);
+    insert!("help", cfg.help);
+    insert!("menu", cfg.menu);
+    insert!("next_tab", cfg.next_tab);
+    insert!("prev_tab", cfg.prev_tab);
+    insert!("new_vm", cfg.new_vm);
+    insert!("destroy_vm", cfg.destroy_vm);
+    insert!("edit", cfg.edit);
+    insert!("enter", cfg.enter);
+    insert!("up", cfg.up);
+    insert!("down", cfg.down);
+    map
+}
+
+fn parse_keybinding(s: &str) -> Option<(KeyCode, KeyModifiers)> {
+    let s = s.trim();
+    let mut mods = KeyModifiers::empty();
+    let mut key = s;
+    if let Some(stripped) = s.strip_prefix("Ctrl+") {
+        mods |= KeyModifiers::CONTROL;
+        key = stripped;
+    }
+    if let Some(stripped) = key.strip_prefix("Alt+") {
+        mods |= KeyModifiers::ALT;
+        key = stripped;
+    }
+    if let Some(stripped) = key.strip_prefix("Shift+") {
+        mods |= KeyModifiers::SHIFT;
+        key = stripped;
+    }
+    let code = match key.to_lowercase().as_str() {
+        "tab" => KeyCode::Tab,
+        "backtab" => KeyCode::BackTab,
+        "enter" => KeyCode::Enter,
+        "esc" => KeyCode::Esc,
+        "up" => KeyCode::Up,
+        "down" => KeyCode::Down,
+        "left" => KeyCode::Left,
+        "right" => KeyCode::Right,
+        c if c.len() == 1 => KeyCode::Char(c.chars().next().unwrap()),
+        _ => return None,
+    };
+    Some((code, mods))
 } 
