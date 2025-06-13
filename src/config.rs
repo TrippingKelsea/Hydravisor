@@ -1,9 +1,9 @@
 // src/config.rs
-use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
+use anyhow::{Context, Result};
 use xdg::BaseDirectories;
 
 pub const APP_NAME: &str = "hydravisor";

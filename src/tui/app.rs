@@ -21,7 +21,7 @@ use aws_sdk_bedrock::types::FoundationModelSummary;
 use crate::config::Config;
 use crate::session_manager::SessionManager;
 use crate::policy::PolicyEngine;
-use crate::env_manager::{EnvironmentManager, EnvironmentStatus};
+use crate::libvirt_manager::{LibvirtManager, VmStatus};
 use crate::audit_engine::AuditEngine;
 use crate::ollama_manager::OllamaManager;
 #[cfg(feature = "bedrock_integration")]
@@ -143,7 +143,7 @@ pub struct App {
     #[cfg(feature = "bedrock_integration")]
     pub bedrock_models: Vec<FoundationModelSummary>,
 
-    pub vms: Vec<EnvironmentStatus>,
+    pub vms: Vec<VmStatus>,
     pub vm_list_state: ListState,
     
     #[cfg(feature = "ollama_integration")]
@@ -153,7 +153,7 @@ pub struct App {
     pub bedrock_model_list_state: ListState,
 
     pub config: Arc<Config>,
-    pub env_manager: Arc<Mutex<EnvironmentManager>>,
+    pub libvirt_manager: Arc<Mutex<LibvirtManager>>,
     pub ollama_manager: Arc<Mutex<OllamaManager>>,
     #[cfg(feature = "bedrock_integration")]
     pub bedrock_manager: Arc<Mutex<BedrockManager>>,
@@ -230,7 +230,7 @@ impl App {
         config: Arc<Config>,
         _session_manager: Arc<SessionManager>,
         _policy_engine: Arc<PolicyEngine>,
-        env_manager: Arc<Mutex<EnvironmentManager>>,
+        libvirt_manager: Arc<Mutex<LibvirtManager>>,
         _audit_engine: Arc<AuditEngine>,
         ollama_manager: Arc<Mutex<OllamaManager>>,
         #[cfg(feature = "bedrock_integration")] bedrock_manager: Arc<Mutex<BedrockManager>>,
@@ -266,7 +266,7 @@ impl App {
             #[cfg(feature = "bedrock_integration")]
             bedrock_model_list_state: ListState::default(),
             config: Arc::clone(&config),
-            env_manager,
+            libvirt_manager,
             ollama_manager,
             #[cfg(feature = "bedrock_integration")]
             bedrock_manager,
@@ -386,10 +386,10 @@ impl App {
     }
 
     pub async fn fetch_vms(&mut self) {
-        let em = self.env_manager.lock().await;
-        self.libvirt_connected = em.is_libvirt_connected();
+        let lm = self.libvirt_manager.lock().await;
+        self.libvirt_connected = lm.is_libvirt_connected();
         if self.libvirt_connected {
-            match em.list_environments() {
+            match lm.list_vms() {
                 Ok(vms) => {
                     self.vms = vms;
                     if self.vms.is_empty() {
@@ -400,8 +400,14 @@ impl App {
                 }
                 Err(e) => {
                     error!("Failed to fetch VMs: {}", e);
+                    self.vms.clear();
+                    self.vm_list_state.select(None);
                 }
             }
+        } else {
+            // If not connected, clear the list
+            self.vms.clear();
+            self.vm_list_state.select(None);
         }
     }
 

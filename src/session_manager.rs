@@ -7,7 +7,7 @@ use std::sync::{Arc};
 use tokio::sync::Mutex;
 
 use crate::config::Config as AppConfig;
-use crate::env_manager::{EnvironmentManager, EnvironmentType};
+use crate::libvirt_manager::LibvirtManager;
 use crate::policy::PolicyEngine;
 use crate::ssh_manager::SshManager;
 use crate::audit_engine::AuditEngine;
@@ -17,8 +17,7 @@ use crate::audit_engine::AuditEngine;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Session {
     pub session_id: String,          // Unique ID for this Hydravisor session
-    pub environment_instance_id: String, // ID of the VM/container this session is tied to
-    pub environment_type: EnvironmentType,
+    pub environment_instance_id: String, // ID of the VM this session is tied to
     pub agent_id: Option<String>,    // ID of the AI agent attached (if any)
     pub model_id: Option<String>,    // ID of the model used by the agent (if any)
     pub tmux_session_name: Option<String>, // Name of the tmux session, e.g., "hydravisor-session_id"
@@ -40,7 +39,7 @@ pub enum SessionStatus {
 pub struct SessionManager {
     // These fields are not read and will be removed.
     // app_config: Arc<Config>,
-    // env_manager: Arc<Mutex<EnvironmentManager>>,
+    // libvirt_manager: Arc<Mutex<LibvirtManager>>,
     // policy_engine: Arc<PolicyEngine>,
     // ssh_manager: Arc<SshManager>,
     // audit_engine: Arc<AuditEngine>,
@@ -50,7 +49,7 @@ pub struct SessionManager {
 impl SessionManager {
     pub fn new(
         _app_config: Arc<AppConfig>,
-        _env_manager: Arc<Mutex<EnvironmentManager>>,
+        _libvirt_manager: Arc<Mutex<LibvirtManager>>,
         _policy_engine: Arc<PolicyEngine>,
         _ssh_manager: Arc<SshManager>,
         _audit_engine: Arc<AuditEngine>,

@@ -73,9 +73,9 @@ pub async fn run_app_loop(
                         app.fetch_bedrock_models().await;
                     }
                     AppEvent::DestroyVm(vm_name) => {
-                        let env_manager = Arc::clone(&app.env_manager);
+                        let libvirt_manager = Arc::clone(&app.libvirt_manager);
                         tokio::spawn(async move {
-                            if let Err(e) = env_manager.lock().await.destroy_environment(&vm_name) {
+                            if let Err(e) = libvirt_manager.lock().await.destroy_vm(&vm_name) {
                                 error!("Failed to destroy VM '{}': {}", &vm_name, e);
                             }
                             // Need to trigger a refresh. For now, rely on tick or user action.
@@ -83,9 +83,9 @@ pub async fn run_app_loop(
                         app.event_sender.send(AppEvent::FetchVms).unwrap(); // Trigger refresh
                     }
                     AppEvent::ResumeVm(vm_name) => {
-                        let env_manager = Arc::clone(&app.env_manager);
+                        let libvirt_manager = Arc::clone(&app.libvirt_manager);
                         tokio::spawn(async move {
-                            if let Err(e) = env_manager.lock().await.resume_environment(&vm_name) {
+                            if let Err(e) = libvirt_manager.lock().await.resume_vm(&vm_name) {
                                 error!("Failed to start VM '{}': {}", &vm_name, e);
                             }
                         });
@@ -122,7 +122,7 @@ pub async fn run_app_loop(
     }
 }
 
-pub fn on_tick(app: &mut App) {
+pub fn on_tick(_app: &mut App) {
     // This is now handled in app.tick()
 }
 

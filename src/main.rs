@@ -1,13 +1,16 @@
 #![allow(clippy::all)] // TEMPORARY: To reduce noise during refactoring
 // src/main.rs
 
+mod api;
+mod audit;
 mod cli;
 mod config;
+mod libvirt_manager;
 mod errors;
+mod logging;
 mod tui;
 // Placeholders for other modules based on design
 mod audit_engine;
-mod env_manager;
 mod mcp;
 mod policy;
 mod session_manager;
@@ -27,7 +30,7 @@ use config::{Config, APP_NAME}; // Import APP_NAME
 use policy::PolicyEngine;
 use ssh_manager::SshManager;
 use audit_engine::AuditEngine;
-use env_manager::EnvironmentManager;
+use libvirt_manager::LibvirtManager;
 use session_manager::SessionManager;
 use ollama_manager::OllamaManager;
 #[cfg(feature = "bedrock_integration")]
@@ -159,14 +162,14 @@ async fn main() -> Result<()> {
     let audit_engine = Arc::new(AuditEngine::new(&config)?);
     info!("Audit Engine initialized.");
 
-    let env_manager = match EnvironmentManager::new(&config) {
+    let libvirt_manager = match LibvirtManager::new(&config) {
         Ok(manager) => Arc::new(Mutex::new(manager)),
         Err(e) => {
-            error!("Failed to initialize Environment Manager: {}", e);
+            error!("Failed to initialize Libvirt Manager: {}", e);
             return Err(e.into());
         }
     };
-    info!("Environment Manager initialized.");
+    info!("Libvirt Manager initialized.");
 
     let ollama_manager_result = OllamaManager::new(&config).await;
     let ollama_manager = match ollama_manager_result {
@@ -210,7 +213,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    let session_manager = match SessionManager::new(Arc::clone(&config), Arc::clone(&env_manager), Arc::clone(&policy_engine), Arc::clone(&ssh_manager), Arc::clone(&audit_engine)) {
+    let session_manager = match SessionManager::new(Arc::clone(&config), Arc::clone(&libvirt_manager), Arc::clone(&policy_engine), Arc::clone(&ssh_manager), Arc::clone(&audit_engine)) {
         Ok(manager) => Arc::new(manager),
         Err(e) => {
             error!("Failed to initialize Session Manager: {}", e);
@@ -230,7 +233,7 @@ async fn main() -> Result<()> {
             // SshManager is not currently taken by handle_command, will add later if needed by subcommands
             // Arc::clone(&ssh_manager),
             Arc::clone(&session_manager),
-            Arc::clone(&env_manager),
+            Arc::clone(&libvirt_manager),
             Arc::clone(&audit_engine),
             // OllamaManager is not currently taken by handle_command
             // Arc::clone(&ollama_manager),
@@ -244,13 +247,14 @@ async fn main() -> Result<()> {
             Arc::clone(&config),
             Arc::clone(&session_manager),
             Arc::clone(&policy_engine),
-            Arc::clone(&env_manager),
+            Arc::clone(&libvirt_manager),
             Arc::clone(&audit_engine),
             Arc::clone(&ollama_manager),
             #[cfg(feature = "bedrock_integration")]
             Arc::clone(&bedrock_manager),
             tui_log_rx.expect("Log receiver should exist in TUI mode"), // Pass receiver
-        ).await?; // run_tui is now async
+        )
+        .await?; // run_tui is now async
     } else {
         info!("No subcommand provided and running in headless mode. Exiting.");
         // Optionally, print help here using clap if no command is given

@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use crate::config::Config;
 use crate::policy::PolicyEngine;
 use crate::session_manager::SessionManager;
-use crate::env_manager::EnvironmentManager;
+use crate::libvirt_manager::LibvirtManager;
 use crate::audit_engine::AuditEngine;
 
 use anyhow::Result;
@@ -167,13 +167,13 @@ pub async fn handle_command(
     config: Arc<Config>,
     policy_engine: Arc<PolicyEngine>,
     session_manager: Arc<SessionManager>,
-    env_manager: Arc<Mutex<EnvironmentManager>>,
+    libvirt_manager: Arc<Mutex<LibvirtManager>>,
     audit_engine: Arc<AuditEngine>,
 ) -> Result<()> {
     match command {
         Commands::Policy(policy_cmd) => handle_policy_command(policy_cmd, config, policy_engine).await?,
         Commands::Agent(agent_cmd) => handle_agent_command(agent_cmd, config, session_manager).await?,
-        Commands::Vm(vm_cmd) => handle_vm_command(vm_cmd, config, env_manager).await?,
+        Commands::Vm(vm_cmd) => handle_vm_command(vm_cmd, config, libvirt_manager).await?,
         Commands::Log(log_cmd) => handle_log_command(log_cmd, config, audit_engine).await?,
     }
     Ok(())
@@ -256,42 +256,50 @@ async fn handle_agent_command(
 ) -> Result<()> {
     match command {
         AgentCommands::List => {
-            println!("Agent list command");
-            // TODO: Use _session_manager
-            todo!("Implement agent list - requires SessionManager or other state tracking agents");
+            println!("List agents command");
+            // TODO: Fetch from SessionManager
         }
         AgentCommands::Info { agent_id } => {
-            println!("Agent info command: AgentID: {}", agent_id);
-            // TODO: Use _session_manager
-            todo!("Implement agent info - requires SessionManager or other state tracking agents");
+            println!("Agent info command for: {}", agent_id);
+            // TODO: Fetch from SessionManager
         }
     }
-    // Ok(())
+    Ok(())
 }
 
 async fn handle_vm_command(
     command: VmCommands,
     _config: Arc<Config>,
-    env_manager: Arc<Mutex<EnvironmentManager>>, // Added, marked unused for now
+    libvirt_manager: Arc<Mutex<LibvirtManager>>, // Added, marked unused for now
 ) -> Result<()> {
     match command {
         VmCommands::List => {
-            println!("VM list command");
-            let env_manager_guard = env_manager.lock().await;
-            let vms = env_manager_guard.list_environments()?;
-            // TODO: Pretty print the VM list
-            println!("Found {} environments:", vms.len());
-            for vm in vms {
-                println!("  - Name: {}, State: {:?}, IP: {:?}, Type: {:?}", vm.name, vm.state, vm.ip_address, vm.env_type);
+            println!("Listing all known VMs...");
+            let libvirt_manager_guard = libvirt_manager.lock().await;
+            let vms = libvirt_manager_guard.list_vms()?;
+            if vms.is_empty() {
+                println!("No VMs found.");
+            } else {
+                // TODO: Replace with a proper table using a crate like `prettytable-rs`
+                println!("{:<38} {:<25} {:<12} {:<10}", "ID", "NAME", "STATE", "CORES");
+                for vm in vms {
+                    println!(
+                        "{:<38} {:<25} {:<12?} {:<10}",
+                        vm.instance_id,
+                        vm.name,
+                        vm.state,
+                        vm.cpu_cores_used.map_or_else(|| "N/A".to_string(), |c| c.to_string())
+                    );
+                }
             }
         }
         VmCommands::Info { vm_id } => {
             println!("VM info command for: {}", vm_id);
-            // TODO: Implement VM info logic
+            // TODO: Fetch from EnvManager and format output
         }
         VmCommands::Snapshot { vm_id, output } => {
-            println!("VM snapshot command for: {} to file: {:?}", vm_id, output);
-            // TODO: Implement VM snapshot logic
+            println!("VM snapshot command for: {}, Output: {:?}", vm_id, output);
+            // TODO: Call EnvManager snapshot method
         }
     }
     Ok(())

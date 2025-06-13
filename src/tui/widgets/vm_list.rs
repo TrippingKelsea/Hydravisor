@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 use crate::tui::App;
-use crate::env_manager::EnvironmentState;
+use crate::libvirt_manager::VmState;
 
 pub struct VmListWidget;
 
@@ -33,9 +33,9 @@ impl VmListWidget {
         let vm_items: Vec<ListItem> = app.vms.iter()
             .map(|vm| {
                 let state_style = match vm.state {
-                    EnvironmentState::Running => theme.vm_list_status_running,
-                    EnvironmentState::Stopped => theme.vm_list_status_stopped,
-                    EnvironmentState::Suspended => theme.vm_list_status_other,
+                    VmState::Running => theme.vm_list_status_running,
+                    VmState::Stopped => theme.vm_list_status_stopped,
+                    VmState::Suspended => theme.vm_list_status_other,
                     _ => theme.vm_list_status_other,
                 };
                 let content = Line::from(vec![
@@ -67,15 +67,14 @@ impl VmListWidget {
                     Line::from(vec![Span::styled("Name: ", Style::default().fg(theme.secondary_foreground)), Span::raw(&vm.name)]),
                     Line::from(vec![Span::styled("ID:   ", Style::default().fg(theme.secondary_foreground)), Span::raw(format!("{}", vm.instance_id))]),
                     Line::from(vec![Span::styled("State: ", Style::default().fg(theme.secondary_foreground)), Span::styled(format!("{:?}", vm.state), match vm.state {
-                        EnvironmentState::Running => theme.vm_list_status_running,
-                        EnvironmentState::Stopped => theme.vm_list_status_stopped,
-                        EnvironmentState::Suspended => theme.vm_list_status_other,
+                        VmState::Running => theme.vm_list_status_running,
+                        VmState::Stopped => theme.vm_list_status_stopped,
+                        VmState::Suspended => theme.vm_list_status_other,
                         _ => theme.vm_list_status_other,
                     })]),
-                    Line::from(vec![Span::styled("Type: ", Style::default().fg(theme.secondary_foreground)), Span::raw(format!("{:?}", vm.env_type))]),
-                    Line::from(vec![Span::styled("CPUs: ", Style::default().fg(theme.secondary_foreground)), Span::raw(format!("{:?}", vm.cpu_cores_used))]),
-                    Line::from(vec![Span::styled("Max Mem: ", Style::default().fg(theme.secondary_foreground)), Span::raw(format!("{:?} KB", vm.memory_max_kb))]),
-                    Line::from(vec![Span::styled("Used Mem: ", Style::default().fg(theme.secondary_foreground)), Span::raw(format!("{:?} KB", vm.memory_used_kb))]),
+                    Line::from(vec![Span::styled("CPUs: ", Style::default().fg(theme.secondary_foreground)), Span::raw(format!("{:?}", vm.cpu_cores_used.map(|c| c.to_string()).unwrap_or_else(|| "N/A".to_string())))]),
+                    Line::from(vec![Span::styled("Max Mem: ", Style::default().fg(theme.secondary_foreground)), Span::raw(format!("{:?} KB", vm.memory_max_kb.map(|m| m.to_string()).unwrap_or_else(|| "N/A".to_string())))]),
+                    Line::from(vec![Span::styled("Used Mem: ", Style::default().fg(theme.secondary_foreground)), Span::raw(format!("{:?} KB", vm.memory_used_kb.map(|m| m.to_string()).unwrap_or_else(|| "N/A".to_string())))]),
                 ];
                 f.render_widget(Paragraph::new(Text::from(details_text)).style(Style::default().fg(theme.primary_foreground)), right_pane_content_area);
             }
